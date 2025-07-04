@@ -73,6 +73,11 @@ async def root():
     """Health check endpoint"""
     return {"message": "SortSeek Backend is running", "status": "healthy"}
 
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for connection testing"""
+    return {"status": "ok"}
+
 @app.get("/health")
 async def health_check():
     """Detailed health check"""

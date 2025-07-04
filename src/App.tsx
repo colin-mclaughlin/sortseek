@@ -1,35 +1,38 @@
 import React, { useState, useEffect } from 'react'
-import { Search, FolderOpen, FileText, Settings, Menu } from 'lucide-react'
+import { Search, FolderOpen, FileText, Settings, Menu, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
+import { getBackendStatus, getBackendHealth } from '@/lib/api'
 
 function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [isBackendConnected, setIsBackendConnected] = useState(false)
+  const [isCheckingBackend, setIsCheckingBackend] = useState(false)
+  const [backendError, setBackendError] = useState<string | null>(null)
+
+  const checkBackendStatus = async () => {
+    setIsCheckingBackend(true)
+    setBackendError(null)
+    
+    try {
+      const status = await getBackendStatus()
+      setIsBackendConnected(status.status === 'ok')
+      console.log('Backend status:', status)
+    } catch (error) {
+      setIsBackendConnected(false)
+      setBackendError(error instanceof Error ? error.message : 'Unknown error')
+      console.error('Backend connection failed:', error)
+    } finally {
+      setIsCheckingBackend(false)
+    }
+  }
 
   useEffect(() => {
-    // Initialize backend connection
-    const initBackend = async () => {
-      try {
-        // @ts-ignore
-        const result = await window.api?.backend?.start()
-        setIsBackendConnected(result?.success || false)
-      } catch (error) {
-        console.error('Failed to start backend:', error)
-        setIsBackendConnected(false)
-      }
-    }
-
-    initBackend()
-
-    return () => {
-      // Cleanup backend on unmount
-      // @ts-ignore
-      window.api?.backend?.stop()
-    }
+    // Check backend status on component mount
+    checkBackendStatus()
   }, [])
 
   return (
@@ -51,7 +54,21 @@ function App(): React.JSX.Element {
               <span className="text-sm text-muted-foreground">
                 {isBackendConnected ? 'Connected' : 'Disconnected'}
               </span>
+              {backendError && (
+                <span className="text-xs text-red-500 ml-2" title={backendError}>
+                  Error
+                </span>
+              )}
             </div>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={checkBackendStatus}
+              disabled={isCheckingBackend}
+              title="Test Backend Connection"
+            >
+              <RefreshCw className={`h-4 w-4 ${isCheckingBackend ? 'animate-spin' : ''}`} />
+            </Button>
             <Button variant="ghost" size="icon">
               <Settings className="h-4 w-4" />
             </Button>

@@ -12,10 +12,15 @@ export interface ImportFolderResponse {
 export interface Document {
   id: number
   filename: string
-  filepath: string
-  fileSize: number
-  createdAt: string
-  updatedAt: string
+  file_path: string
+  file_type: string
+  file_size: number
+  content: string
+  summary: string | null
+  created_at: string
+  updated_at: string
+  is_indexed: boolean
+  embedding_path: string | null
 }
 
 export interface DocumentsResponse {

@@ -77,6 +77,7 @@ function App(): React.JSX.Element {
   const loadDocuments = async () => {
     try {
       const result = await getDocuments()
+      console.log('Documents fetched:', result)
       setDocuments(result.documents || [])
     } catch (error) {
       console.error('Failed to load documents:', error)
@@ -229,11 +230,11 @@ function App(): React.JSX.Element {
                               <FileText className="h-5 w-5 text-muted-foreground" />
                               <div>
                                 <p className="font-medium">{doc.filename}</p>
-                                <p className="text-sm text-muted-foreground">{doc.filepath}</p>
+                                <p className="text-sm text-muted-foreground">{doc.file_path}</p>
                               </div>
                             </div>
                             <div className="text-sm text-muted-foreground">
-                              {(doc.fileSize / 1024 / 1024).toFixed(2)} MB
+                              {(doc.file_size / 1024 / 1024).toFixed(2)} MB
                             </div>
                           </div>
                         ))}

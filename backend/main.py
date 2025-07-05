@@ -110,25 +110,66 @@ async def health_check():
         raise HTTPException(status_code=500, detail="Service unhealthy")
 
 @app.post("/import")
-async def import_folder(request: ImportFolderRequest):
+async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_db)):
     """Import files from a list of file paths"""
     try:
         logger.info(f"Received import request with {len(request.filePaths)} files")
         
-        # Log all file paths for now (no actual file processing yet)
-        for file_path in request.filePaths:
-            logger.info(f"File to import: {file_path}")
+        imported_files = []
         
-        # For now, just return success with the file paths
-        # TODO: Implement actual file processing and database storage
+        for file_path in request.filePaths:
+            try:
+                logger.info(f"Processing file: {file_path}")
+                
+                # Check if file exists
+                if not os.path.exists(file_path):
+                    logger.warning(f"File does not exist: {file_path}")
+                    continue
+                
+                # Get file info
+                file_size = os.path.getsize(file_path)
+                filename = os.path.basename(file_path)
+                file_type = os.path.splitext(filename)[1].lower().lstrip('.')
+                
+                # Check if document already exists
+                existing_doc = db.query(Document).filter(Document.file_path == file_path).first()
+                if existing_doc:
+                    logger.info(f"Document already exists: {file_path}")
+                    imported_files.append(file_path)
+                    continue
+                
+                # Create new document record
+                new_document = Document(
+                    filename=filename,
+                    file_path=file_path,
+                    file_type=file_type,
+                    file_size=file_size,
+                    content="",  # TODO: Extract content from file
+                    summary=None,  # TODO: Generate summary
+                    is_indexed=False
+                )
+                
+                db.add(new_document)
+                logger.info(f"Added document to database: {filename}")
+                imported_files.append(file_path)
+                
+            except Exception as e:
+                logger.error(f"Error processing file {file_path}: {e}")
+                continue
+        
+        # Commit all changes
+        db.commit()
+        logger.info(f"Successfully imported {len(imported_files)} files")
+        
         return ImportFolderResponse(
             success=True,
-            message=f"Successfully received {len(request.filePaths)} files for import",
-            importedFiles=request.filePaths,
-            count=len(request.filePaths)
+            message=f"Successfully imported {len(imported_files)} files",
+            importedFiles=imported_files,
+            count=len(imported_files)
         )
     except Exception as e:
         logger.error(f"Import failed: {e}")
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/import/folder")

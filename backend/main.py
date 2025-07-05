@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import Depends
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from typing import List
 import uvicorn
 
 from database import init_db, get_db
@@ -15,6 +17,16 @@ from models import Document, SearchResult
 from services.file_service import FileService
 from services.search_service import SearchService
 from services.ai_service import AIService
+
+# Pydantic models for request/response
+class ImportFolderRequest(BaseModel):
+    filePaths: List[str]
+
+class ImportFolderResponse(BaseModel):
+    success: bool
+    message: str
+    importedFiles: List[str]
+    count: int
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -97,8 +109,30 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail="Service unhealthy")
 
+@app.post("/import")
+async def import_folder(request: ImportFolderRequest):
+    """Import files from a list of file paths"""
+    try:
+        logger.info(f"Received import request with {len(request.filePaths)} files")
+        
+        # Log all file paths for now (no actual file processing yet)
+        for file_path in request.filePaths:
+            logger.info(f"File to import: {file_path}")
+        
+        # For now, just return success with the file paths
+        # TODO: Implement actual file processing and database storage
+        return ImportFolderResponse(
+            success=True,
+            message=f"Successfully received {len(request.filePaths)} files for import",
+            importedFiles=request.filePaths,
+            count=len(request.filePaths)
+        )
+    except Exception as e:
+        logger.error(f"Import failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/import/folder")
-async def import_folder(folder_path: str):
+async def import_folder_legacy(folder_path: str):
     """Import all supported documents from a folder recursively"""
     try:
         if file_service is None:

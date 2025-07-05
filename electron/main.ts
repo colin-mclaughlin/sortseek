@@ -1,6 +1,6 @@
-import { app, BrowserWindow, shell, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, readdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 // import icon from '../../resources/icon.png?asset'
 
@@ -197,5 +197,88 @@ ipcMain.handle('stop-backend', async () => {
   console.log('🐍 Stopping Python backend...')
   return { success: true }
 })
+
+// IPC handlers for file system operations
+ipcMain.handle('select-folder', async () => {
+  try {
+    console.log('📁 Opening folder selection dialog...')
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select folder to import'
+    })
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const folderPath = result.filePaths[0]
+      console.log('📁 Selected folder:', folderPath)
+      
+      // Scan for PDF files in the selected folder
+      const pdfFiles = scanForPdfFiles(folderPath)
+      console.log(`📄 Found ${pdfFiles.length} PDF files`)
+      
+      return {
+        success: true,
+        folderPath,
+        filePaths: pdfFiles
+      }
+    } else {
+      console.log('📁 Folder selection cancelled')
+      return {
+        success: false,
+        message: 'No folder selected'
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error selecting folder:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+})
+
+ipcMain.handle('import-folder', async (event, filePaths: string[]) => {
+  try {
+    console.log('📤 Importing folder with file paths:', filePaths)
+    
+    // Send file paths to backend via HTTP
+    const response = await fetch('http://localhost:8000/import', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ filePaths }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    console.log('✅ Import result:', result)
+    
+    return result
+  } catch (error) {
+    console.error('❌ Error importing folder:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+})
+
+// Helper function to scan for PDF files in a folder
+function scanForPdfFiles(folderPath: string): string[] {
+  try {
+    const files = readdirSync(folderPath)
+    const pdfFiles = files
+      .filter(file => file.toLowerCase().endsWith('.pdf'))
+      .map(file => join(folderPath, file))
+    
+    return pdfFiles
+  } catch (error) {
+    console.error('❌ Error scanning folder:', error)
+    return []
+  }
+}
 
 console.log('🎯 Main process setup completed') 

@@ -8,6 +8,10 @@ const api = {
   backend: {
     start: () => ipcRenderer.invoke('start-backend'),
     stop: () => ipcRenderer.invoke('stop-backend')
+  },
+  fileSystem: {
+    selectFolder: () => ipcRenderer.invoke('select-folder'),
+    importFolder: (filePaths: string[]) => ipcRenderer.invoke('import-folder', filePaths)
   }
 }
 

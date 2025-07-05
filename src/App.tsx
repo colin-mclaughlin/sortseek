@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react'
-import { Search, FolderOpen, FileText, Settings, Menu, RefreshCw } from 'lucide-react'
+import { Search, FolderOpen, FileText, Settings, Menu, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { getBackendStatus, getBackendHealth } from '@/lib/api'
+import { getBackendStatus, getBackendHealth, importFolder, getDocuments } from '@/lib/api'
+import { Document } from '@/lib/types'
 
 function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [isBackendConnected, setIsBackendConnected] = useState(false)
   const [isCheckingBackend, setIsCheckingBackend] = useState(false)
   const [backendError, setBackendError] = useState<string | null>(null)
+  const [documents, setDocuments] = useState<Document[]>([])
+  const [isImporting, setIsImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   const checkBackendStatus = async () => {
     setIsCheckingBackend(true)
@@ -30,9 +34,60 @@ function App(): React.JSX.Element {
     }
   }
 
+  const handleImportFolder = async () => {
+    setIsImporting(true)
+    setImportError(null)
+    
+    try {
+      // Use Electron API to select folder and get file paths
+      // @ts-ignore
+      const result = await window.api?.fileSystem?.selectFolder()
+      
+      if (!result.success) {
+        throw new Error(result.message || 'Failed to select folder')
+      }
+      
+      console.log('Selected folder:', result.folderPath)
+      console.log('PDF files found:', result.filePaths)
+      
+      if (result.filePaths.length === 0) {
+        throw new Error('No PDF files found in the selected folder')
+      }
+      
+      // Send file paths to backend
+      const importResult = await importFolder(result.filePaths)
+      
+      if (!importResult.success) {
+        throw new Error(importResult.message || 'Failed to import files')
+      }
+      
+      console.log('Import successful:', importResult)
+      
+      // Refresh documents list
+      await loadDocuments()
+      
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Unknown error')
+      console.error('Import failed:', error)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+  
+  const loadDocuments = async () => {
+    try {
+      const result = await getDocuments()
+      setDocuments(result.documents || [])
+    } catch (error) {
+      console.error('Failed to load documents:', error)
+    }
+  }
+
   useEffect(() => {
     // Check backend status on component mount
     checkBackendStatus()
+    // Load documents
+    loadDocuments()
   }, [])
 
   return (
@@ -81,10 +136,22 @@ function App(): React.JSX.Element {
         {/* Sidebar */}
         <aside className="w-64 border-r bg-card">
           <div className="p-4">
-            <Button className="w-full justify-start" variant="outline">
-              <FolderOpen className="mr-2 h-4 w-4" />
-              Import Folder
+            <Button 
+              className="w-full justify-start" 
+              variant="outline"
+              onClick={handleImportFolder}
+              disabled={isImporting || !isBackendConnected}
+            >
+              {isImporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <FolderOpen className="mr-2 h-4 w-4" />
+              )}
+              {isImporting ? 'Importing...' : 'Import Folder'}
             </Button>
+            {importError && (
+              <p className="text-xs text-red-500 mt-2">{importError}</p>
+            )}
           </div>
           
           <Separator />
@@ -132,20 +199,46 @@ function App(): React.JSX.Element {
               <TabsContent value="documents" className="mt-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Your Documents</CardTitle>
+                    <CardTitle>Your Documents ({documents.length})</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="text-center py-12">
-                      <FolderOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                      <h3 className="text-lg font-medium mb-2">No documents yet</h3>
-                      <p className="text-muted-foreground mb-4">
-                        Import a folder to get started with SortSeek
-                      </p>
-                      <Button>
-                        <FolderOpen className="mr-2 h-4 w-4" />
-                        Import Folder
-                      </Button>
-                    </div>
+                    {documents.length === 0 ? (
+                      <div className="text-center py-12">
+                        <FolderOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-medium mb-2">No documents yet</h3>
+                        <p className="text-muted-foreground mb-4">
+                          Import a folder to get started with SortSeek
+                        </p>
+                        <Button 
+                          onClick={handleImportFolder}
+                          disabled={isImporting || !isBackendConnected}
+                        >
+                          {isImporting ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <FolderOpen className="mr-2 h-4 w-4" />
+                          )}
+                          {isImporting ? 'Importing...' : 'Import Folder'}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {documents.map((doc) => (
+                          <div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg">
+                            <div className="flex items-center space-x-3">
+                              <FileText className="h-5 w-5 text-muted-foreground" />
+                              <div>
+                                <p className="font-medium">{doc.filename}</p>
+                                <p className="text-sm text-muted-foreground">{doc.filepath}</p>
+                              </div>
+                            </div>
+                            <div className="text-sm text-muted-foreground">
+                              {(doc.fileSize / 1024 / 1024).toFixed(2)} MB
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

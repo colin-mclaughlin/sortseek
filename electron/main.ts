@@ -32,7 +32,7 @@ function createWindow(): void {
   
   try {
     // Check if preload file exists
-    const preloadPath = join(__dirname, 'preload.js')
+    const preloadPath = join(__dirname, 'preload.cjs')
     console.log('📍 Preload path:', preloadPath)
     console.log('📁 Preload file exists:', existsSync(preloadPath))
     

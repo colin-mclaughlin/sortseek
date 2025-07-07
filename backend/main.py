@@ -117,7 +117,7 @@ async def root():
 @app.get("/ping")
 async def ping():
     """Simple ping endpoint for connection testing"""
-    return {"status": "ok"}
+    return JSONResponse(content={"status": "ok"})
 
 @app.get("/health")
 async def health_check():
@@ -389,6 +389,8 @@ async def summarize_document(request: SummarizeRequest):
                 # Generate summary using AI
                 summary = await ai_service.summarize_text(text, max_length=300)
                 
+                print(f"🧠 Summarization complete for {request.filePath}, summary length: {len(summary)}")
+                
                 summaries.append(PageSummary(
                     page=page_num + 1,
                     summary=summary
@@ -407,6 +409,35 @@ async def summarize_document(request: SummarizeRequest):
         
         logger.info(f"Successfully summarized {len(summaries)} pages")
         
+        # Save summaries to document and trigger reindexing
+        try:
+            # Find the document in the database
+            db = next(get_db())
+            document = db.query(Document).filter(Document.file_path == request.filePath).first()
+            
+            if document:
+                # Combine all summaries into one content field
+                combined_summary = "\n\n".join([f"Page {s.page}: {s.summary}" for s in summaries])
+                
+                print(f"📥 Calling index_document() for: {request.filePath}")
+                
+                # Update document content with summaries and reindex
+                success = await search_service.update_document_content(
+                    document.id, 
+                    combined_summary, 
+                    "content"  # Update the main content field
+                )
+                
+                if success:
+                    logger.info(f"Successfully updated and reindexed document {document.id} with summaries")
+                else:
+                    logger.warning(f"Failed to update and reindex document {document.id} with summaries")
+            else:
+                logger.warning(f"Document not found in database for path: {request.filePath}")
+                
+        except Exception as e:
+            logger.error(f"Failed to save summaries to document: {e}")
+        
         return SummarizeResponse(
             success=True,
             message=f"Successfully summarized {len(summaries)} pages",
@@ -416,6 +447,50 @@ async def summarize_document(request: SummarizeRequest):
         
     except Exception as e:
         logger.error(f"Document summarization failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-document-content")
+async def update_document_content(
+    document_id: int,
+    content: str,
+    content_type: str = "content"
+):
+    """Update document content and reindex it"""
+    try:
+        if not content or not content.strip():
+            raise HTTPException(status_code=400, detail="Content cannot be empty")
+        
+        success = await search_service.update_document_content(document_id, content.strip(), content_type)
+        
+        if success:
+            return {
+                "message": f"Document {document_id} content updated and reindexed successfully",
+                "document_id": document_id,
+                "content_type": content_type
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update document content")
+            
+    except Exception as e:
+        logger.error(f"Failed to update document content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/reset-embeddings")
+async def reset_embeddings():
+    """Reset all embeddings (useful for handling dimension mismatches)"""
+    try:
+        await search_service.reset_embeddings()
+        
+        # Reinitialize the search service
+        await search_service.initialize()
+        
+        return {
+            "message": "Embeddings reset and reinitialized successfully",
+            "note": "All documents will need to be reindexed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to reset embeddings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

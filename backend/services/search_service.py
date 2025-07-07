@@ -15,6 +15,26 @@ from langchain.embeddings import OpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
+class NamedEmbeddingFunction:
+    def __init__(self, embedder, name="openai"):
+        self.embedder = embedder
+        self._name = name
+
+    def __call__(self, input):
+        # ChromaDB expects input to be either a single string or a list of strings
+        if isinstance(input, str):
+            return self.embedder.embed_query(input)
+        elif isinstance(input, list):
+            return self.embedder.embed_documents(input)
+        else:
+            raise ValueError("Input must be a string or list of strings")
+
+    def embed_query(self, text):
+        return self.embedder.embed_query(text)
+
+    def name(self):
+        return self._name
+
 class SearchService:
     """Service for semantic search using ChromaDB"""
     
@@ -25,6 +45,32 @@ class SearchService:
         self._collection = None
         self.embeddings_dir = Path("./data/embeddings")
         self.embeddings_dir.mkdir(parents=True, exist_ok=True)
+        self._embedding_function = None
+        self._embedding_dimension = None
+    
+    def _get_embedding_function(self):
+        """Get the embedding function for ChromaDB"""
+        if self._embedding_function is None:
+            try:
+                api_key = os.getenv("OPENAI_API_KEY")
+                if api_key:
+                    # Use OpenAI embeddings
+                    embedder = OpenAIEmbeddings(openai_api_key=api_key)
+                    self._embedding_function = NamedEmbeddingFunction(embedder, name="openai")
+                    self._embedding_dimension = 1536  # OpenAI text-embedding-ada-002 dimension
+                    logger.info("Using OpenAI embeddings (1536 dimensions)")
+                else:
+                    # Fallback to simple embeddings
+                    self._embedding_function = None
+                    self._embedding_dimension = 384
+                    logger.warning("OpenAI API key not found, using simple embeddings (384 dimensions)")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI embeddings: {e}")
+                self._embedding_function = None
+                self._embedding_dimension = 384
+                logger.warning("Falling back to simple embeddings (384 dimensions)")
+        
+        return self._embedding_function, self._embedding_dimension
     
     async def initialize(self):
         """Initialize ChromaDB client and collection"""
@@ -39,10 +85,25 @@ class SearchService:
             )
             logger.info("ChromaDB client initialized successfully")
             
-            # Get or create collection
+            # Get embedding function and dimension
+            embedding_function, embedding_dim = self._get_embedding_function()
+            
+            # Delete existing collection if it exists (to handle dimension mismatch)
+            try:
+                self._client.delete_collection("sortseek")
+                logger.info("Deleted existing collection to handle embedding dimension mismatch")
+            except:
+                pass  # Collection doesn't exist, which is fine
+            
+            # Get or create collection with proper embedding function
             self._collection = self._client.get_or_create_collection(
                 name="sortseek",
-                metadata={"description": "Document embeddings for semantic search"}
+                embedding_function=embedding_function,
+                metadata={
+                    "description": "Document embeddings for semantic search",
+                    "hnsw:space": "cosine",
+                    "embedding_dimension": str(embedding_dim)
+                }
             )
             self.collection = self._collection
             
@@ -51,7 +112,7 @@ class SearchService:
                 logger.error("Failed to initialize ChromaDB collection")
                 raise RuntimeError("ChromaDB collection initialization failed")
             
-            logger.info("ChromaDB collection 'sortseek' created/loaded successfully")
+            logger.info(f"ChromaDB collection 'sortseek' created/loaded successfully with {embedding_dim} dimensions")
             logger.info("Search service initialized successfully")
             
             # Index existing documents
@@ -78,21 +139,71 @@ class SearchService:
     async def index_document(self, document: Document):
         """Index a single document"""
         try:
-            if not document.content or len(document.content.strip()) == 0:
-                logger.warning(f"Document {document.id} has no content to index")
+            # Debug print at the very top
+            print(f"📥 Entered index_document() with file: {document.filename}")
+            
+            # Debug print as requested
+            print(f"📄 Document ready to index: {document.filename} → {len(document.content) if document.content else 0} chars")
+            
+            # Check if document has content
+            content_to_index = document.content
+            
+            # If no content, try to get it from the file or use summary
+            if not content_to_index or len(content_to_index.strip()) == 0:
+                logger.warning(f"Document {document.id} ({document.filename}) has no content to index")
+                
+                # Try to use summary if available
+                if document.summary and len(document.summary.strip()) > 0:
+                    logger.info(f"Using summary as content for document {document.id} ({document.filename})")
+                    content_to_index = document.summary
+                else:
+                    # Try to re-extract content from the file
+                    try:
+                        from services.file_service import FileService
+                        file_service = FileService()
+                        re_extracted_content = await file_service._extract_content(Path(document.file_path))
+                        
+                        if re_extracted_content and len(re_extracted_content.strip()) > 0:
+                            logger.info(f"Successfully re-extracted content for document {document.id} ({document.filename})")
+                            content_to_index = re_extracted_content
+                            
+                            # Update the document in database with the extracted content
+                            db = next(get_db())
+                            doc = db.query(Document).filter(Document.id == document.id).first()
+                            if doc:
+                                doc.content = content_to_index
+                                db.commit()
+                                logger.info(f"Updated document {document.id} with re-extracted content")
+                        else:
+                            logger.warning(f"Could not re-extract content for document {document.id} ({document.filename}) - skipping indexing")
+                            return
+                    except Exception as e:
+                        logger.error(f"Error re-extracting content for document {document.id} ({document.filename}): {e}")
+                        logger.warning(f"Skipping indexing for document {document.id} ({document.filename}) due to content extraction failure")
+                        return
+            
+            # Final check - if we still don't have content, skip indexing
+            if not content_to_index or len(content_to_index.strip()) == 0:
+                logger.warning(f"Document {document.id} ({document.filename}) has no content after all attempts - skipping indexing")
                 return
+            
+            # Debug print for final content length
+            print(f"📄 Final content length for {document.filename}: {len(content_to_index)}")
+            
+            # Debug print for indexing
+            print(f"📥 Indexing document: {document.filename} — {len(content_to_index)} characters")
                 
             if self._collection is None:
                 logger.error("ChromaDB collection is not initialized. Cannot index document.")
                 return
                 
             # Create embedding for the document
-            embedding = self._create_simple_embedding(document.content)
+            embedding = self._get_embedding(content_to_index)
             
             # Add to ChromaDB collection
             self._collection.add(
                 embeddings=[embedding],
-                documents=[document.content],
+                documents=[content_to_index],
                 metadatas=[{
                     "document_id": document.id,
                     "filename": document.filename,
@@ -110,59 +221,123 @@ class SearchService:
                 doc.embedding_path = f"doc_{document.id}"
                 db.commit()
             
-            logger.info(f"Successfully indexed document {document.id}: {document.filename}")
+            logger.info(f"Successfully indexed document {document.id}: {document.filename} ({len(content_to_index)} chars)")
             
         except Exception as e:
             logger.error(f"Error indexing document {document.id}: {e}")
     
     def _create_simple_embedding(self, text: str) -> List[float]:
-        """Create a simple embedding for text (placeholder implementation)"""
-        # This is a placeholder - in a real implementation, you'd use:
-        # - OpenAI embeddings
-        # - Sentence transformers
-        # - Or another embedding model
-        
-        # For now, create a simple hash-based embedding
+        """Create a simple embedding for text (fallback implementation)"""
+        # Create a simple hash-based embedding
         import hashlib
         hash_obj = hashlib.md5(text.encode())
         hash_bytes = hash_obj.digest()
         
-        # Convert to 384-dimensional vector (similar to some embedding models)
+        # Convert to 384-dimensional vector (consistent with fallback dimension)
         embedding = []
         for i in range(384):
             embedding.append(float(hash_bytes[i % 16]) / 255.0)
+        
+        # Debug print for embedding dimension
+        print(f"🔢 Created simple embedding: {len(embedding)} dimensions")
         
         return embedding
     
     def _get_openai_embedding(self, text: str) -> list:
         """Get OpenAI embedding for a text chunk using LangChain"""
         try:
-            api_key = os.getenv("OPENAI_API_KEY")
-            embedder = OpenAIEmbeddings(openai_api_key=api_key) if api_key else OpenAIEmbeddings()
-            embedding = embedder.embed_query(text)
-            return embedding
+            embedding_function, _ = self._get_embedding_function()
+            
+            if embedding_function:
+                embedding = embedding_function.embed_query(text)
+                
+                # Debug print for embedding dimension
+                print(f"🔢 Created OpenAI embedding: {len(embedding)} dimensions")
+                
+                return embedding
+            else:
+                logger.warning("OpenAI embeddings not available, falling back to simple embedding")
+                return self._create_simple_embedding(text)
+                
         except Exception as e:
             logger.error(f"OpenAI embedding failed: {e}")
+            logger.warning("Falling back to simple embedding")
+            return self._create_simple_embedding(text)
+    
+    def _get_embedding(self, text: str) -> list:
+        """Get embedding using the configured embedding function"""
+        try:
+            embedding_function, embedding_dim = self._get_embedding_function()
+            
+            if embedding_function:
+                # Use OpenAI embeddings (wrapped)
+                embedding = embedding_function.embed_query(text)
+                print(f"🔢 Created OpenAI embedding: {len(embedding)} dimensions")
+                return embedding
+            else:
+                # Use simple embeddings
+                embedding = self._create_simple_embedding(text)
+                print(f"🔢 Created simple embedding: {len(embedding)} dimensions")
+                return embedding
+                
+        except Exception as e:
+            logger.error(f"Embedding failed: {e}")
+            logger.warning("Falling back to simple embedding")
             return self._create_simple_embedding(text)
 
     async def index_document_chunks(self, document: Document, chunks: list, chunk_metadatas: list):
         """Index a list of text chunks for a document, with metadata for each chunk"""
         try:
+            # Debug print for chunks
+            print(f"📄 Document chunks ready to index: {document.filename} → {len(chunks)} chunks")
+            
             if not chunks or not any(c.strip() for c in chunks):
-                logger.warning(f"Document {document.id} has no content chunks to index")
+                logger.warning(f"Document {document.id} ({document.filename}) has no content chunks to index")
                 return
+                
             if self._collection is None:
                 logger.error("ChromaDB collection is not initialized. Cannot index document chunks.")
                 return
-            embeddings = [self._get_openai_embedding(chunk) for chunk in chunks]
-            ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(chunks))]
-            self._collection.add(
-                embeddings=embeddings,
-                documents=chunks,
-                metadatas=chunk_metadatas,
-                ids=ids
-            )
-            logger.info(f"Indexed {len(chunks)} chunks for document {document.id}: {document.filename}")
+                
+            # Filter out empty chunks
+            valid_chunks = []
+            valid_metadatas = []
+            
+            for i, (chunk, metadata) in enumerate(zip(chunks, chunk_metadatas)):
+                if chunk and chunk.strip():
+                    valid_chunks.append(chunk)
+                    valid_metadatas.append(metadata)
+                else:
+                    logger.warning(f"Skipping empty chunk {i} for document {document.id} ({document.filename})")
+            
+            if not valid_chunks:
+                logger.warning(f"No valid chunks found for document {document.id} ({document.filename}) - skipping indexing")
+                return
+            
+            # Debug print for chunk creation
+            print(f"✂️ Created {len(valid_chunks)} chunks for {document.filename}")
+            
+            # Debug print before adding to Chroma
+            print(f"📊 Adding {len(valid_chunks)} chunks to Chroma for {document.filename}")
+                
+            embeddings = [self._get_embedding(chunk) for chunk in valid_chunks]
+            ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(valid_chunks))]
+            
+            # Wrap the add call in try/except with individual chunk logging
+            for i, (chunk, embedding, metadata, chunk_id) in enumerate(zip(valid_chunks, embeddings, valid_metadatas, ids)):
+                try:
+                    self._collection.add(
+                        embeddings=[embedding],
+                        documents=[chunk],
+                        metadatas=[metadata],
+                        ids=[chunk_id]
+                    )
+                    print(f"✅ Indexed chunk {i}: {chunk[:100]}...")
+                except Exception as e:
+                    print(f"❌ Failed to index chunk {i}: {e}")
+            
+            logger.info(f"Indexed {len(valid_chunks)} chunks for document {document.id}: {document.filename}")
+            
         except Exception as e:
             logger.error(f"Error indexing document chunks for {document.id}: {e}")
     
@@ -174,7 +349,7 @@ class SearchService:
                 return []
             
             # Create embedding for query
-            query_embedding = self._create_simple_embedding(query)
+            query_embedding = self._get_embedding(query)
             
             # Search in ChromaDB
             results = self.collection.query(
@@ -269,21 +444,42 @@ class SearchService:
     async def semantic_search(self, query: str, top_k: int = 5) -> list:
         """Semantic search for top_k relevant chunks using OpenAI embeddings and ChromaDB"""
         try:
+            print(f"🔍 Starting semantic search for query: '{query}' (top_k={top_k})")
+            
             if not self.collection:
                 logger.error("Search service not initialized")
+                print("❌ Search service not initialized")
                 return []
-            query_embedding = self._get_openai_embedding(query)
+                
+            # Check collection count
+            try:
+                count = self.collection.count()
+                print(f"📊 ChromaDB collection has {count} documents")
+            except Exception as e:
+                print(f"⚠️ Could not get collection count: {e}")
+            
+            query_embedding = self._get_embedding(query)
+            print(f"🔢 Created query embedding: {len(query_embedding)} dimensions")
+            
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=top_k,
                 include=["documents", "metadatas", "distances"]
             )
+            
+            print(f"🔍 ChromaDB query returned: {results}")
+            
             if not results or not results.get('documents') or not results['documents'][0]:
                 logger.warning("ChromaDB returned no matches for semantic search.")
+                print("❌ No matches found in ChromaDB")
                 return []
+                
+            print(f"✅ Found {len(results['documents'][0])} matches")
+            
             search_results = []
-            for doc, meta, dist in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
+            for i, (doc, meta, dist) in enumerate(zip(results['documents'][0], results['metadatas'][0], results['distances'][0])):
                 score = 1.0 - dist
+                print(f"📄 Match {i+1}: {meta.get('filename', 'Unknown')} (score: {score:.3f}, distance: {dist:.3f})")
                 search_results.append({
                     "filename": meta.get("filename"),
                     "file_path": meta.get("file_path"),
@@ -291,9 +487,13 @@ class SearchService:
                     "content": doc,
                     "score": score
                 })
+            
+            print(f"🎯 Returning {len(search_results)} search results")
             return search_results
+            
         except Exception as e:
             logger.error(f"Semantic search failed: {e}")
+            print(f"❌ Semantic search failed: {e}")
             return []
     
     async def is_healthy(self) -> bool:
@@ -313,6 +513,25 @@ class SearchService:
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
     
+    async def reset_embeddings(self):
+        """Reset all embeddings by deleting the embeddings directory"""
+        try:
+            import shutil
+            if self.embeddings_dir.exists():
+                shutil.rmtree(self.embeddings_dir)
+                logger.info(f"Deleted embeddings directory: {self.embeddings_dir}")
+            
+            # Reset embedding function to force re-initialization
+            self._embedding_function = None
+            self._embedding_dimension = None
+            
+            # Recreate directory
+            self.embeddings_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("Embeddings directory reset successfully")
+            
+        except Exception as e:
+            logger.error(f"Error resetting embeddings: {e}")
+    
     async def reindex_document(self, document_id: int):
         """Reindex a specific document"""
         try:
@@ -331,4 +550,37 @@ class SearchService:
                 await self.index_document(document)
                 
         except Exception as e:
-            logger.error(f"Error reindexing document {document_id}: {e}") 
+            logger.error(f"Error reindexing document {document_id}: {e}")
+    
+    async def update_document_content(self, document_id: int, new_content: str, content_type: str = "content"):
+        """Update document content and reindex it"""
+        try:
+            db = next(get_db())
+            document = db.query(Document).filter(Document.id == document_id).first()
+            
+            if not document:
+                logger.error(f"Document {document_id} not found")
+                return False
+            
+            # Update the appropriate field
+            if content_type == "summary":
+                document.summary = new_content
+                logger.info(f"Updated summary for document {document_id}: {document.filename}")
+            else:
+                document.content = new_content
+                logger.info(f"Updated content for document {document_id}: {document.filename}")
+            
+            # Mark as not indexed so it gets reindexed
+            document.is_indexed = False
+            document.embedding_path = None
+            
+            db.commit()
+            
+            # Reindex the document
+            await self.index_document(document)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating document content for {document_id}: {e}")
+            return False 

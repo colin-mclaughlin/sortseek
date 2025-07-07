@@ -155,39 +155,35 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
                     logger.warning(f"File does not exist: {file_path}")
                     continue
                 
-                # Get file info
-                file_size = os.path.getsize(file_path)
-                filename = os.path.basename(file_path)
-                file_type = os.path.splitext(filename)[1].lower().lstrip('.')
+                # Use file service to import the file (this handles content extraction and indexing)
+                if file_service is None:
+                    raise HTTPException(status_code=503, detail="FileService not initialized")
                 
-                # Check if document already exists
-                existing_doc = db.query(Document).filter(Document.file_path == file_path).first()
-                if existing_doc:
-                    logger.info(f"Document already exists: {file_path}")
+                # Import the file using file service
+                doc_dict = await file_service._import_single_file(Path(file_path))
+                
+                if doc_dict:
+                    # File service already handles indexing, but let's ensure it's indexed
+                    if not doc_dict.get("is_indexed", False):
+                        db = next(get_db())
+                        document = db.query(Document).filter(Document.id == doc_dict["id"]).first()
+                        if document and document.content and search_service:
+                            try:
+                                print(f"📥 Auto-indexing raw content for {document.filename}")
+                                await search_service.index_document(document)
+                                logger.info(f"Auto-indexing completed for document {document.id}: {document.filename}")
+                            except Exception as e:
+                                logger.warning(f"Failed to auto-index document {document.id} ({document.filename}): {e}")
+                    
                     imported_files.append(file_path)
-                    continue
-                
-                # Create new document record
-                new_document = Document(
-                    filename=filename,
-                    file_path=file_path,
-                    file_type=file_type,
-                    file_size=file_size,
-                    content="",  # TODO: Extract content from file
-                    summary=None,  # TODO: Generate summary
-                    is_indexed=False
-                )
-                
-                db.add(new_document)
-                logger.info(f"Added document to database: {filename}")
-                imported_files.append(file_path)
+                    logger.info(f"Successfully imported and indexed: {file_path}")
+                else:
+                    logger.warning(f"Failed to import file: {file_path}")
                 
             except Exception as e:
                 logger.error(f"Error processing file {file_path}: {e}")
                 continue
         
-        # Commit all changes
-        db.commit()
         logger.info(f"Successfully imported {len(imported_files)} files")
         
         return ImportFolderResponse(
@@ -198,7 +194,6 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
         )
     except Exception as e:
         logger.error(f"Import failed: {e}")
-        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/import/folder")

@@ -192,6 +192,12 @@ class SearchService:
             
             # Debug print for indexing
             print(f"📥 Indexing document: {document.filename} — {len(content_to_index)} characters")
+            
+            # Log whether this is raw content or summarized content
+            if document.summary and len(document.summary.strip()) > 0:
+                print(f"🧠 Indexing summarized content for {document.filename}")
+            else:
+                print(f"📄 Auto-indexing raw content for {document.filename}")
                 
             if self._collection is None:
                 logger.error("ChromaDB collection is not initialized. Cannot index document.")

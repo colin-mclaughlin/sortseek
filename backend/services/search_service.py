@@ -6,6 +6,7 @@ import chromadb
 from chromadb.config import Settings
 import numpy as np
 import os
+import re
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -47,6 +48,88 @@ class SearchService:
         self.embeddings_dir.mkdir(parents=True, exist_ok=True)
         self._embedding_function = None
         self._embedding_dimension = None
+    
+    def _extract_filenames_from_query(self, query: str) -> List[str]:
+        """
+        Extract potential filenames from a query string.
+        Handles various formats like "test1.pdf", "test1", "show me test1.pdf", etc.
+        """
+        filenames = []
+        
+        # Convert to lowercase for case-insensitive matching
+        query_lower = query.lower()
+        
+        # Pattern 1: Exact filename with extension (e.g., "test1.pdf", "document.docx")
+        filename_pattern = r'\b([a-zA-Z0-9_\-\s]+\.(pdf|doc|docx|txt|rtf|odt|pages|epub|mobi|azw3|html|htm|xml|json|csv|md|tex|odf|ods|odp|ppt|pptx|xls|xlsx))\b'
+        matches = re.findall(filename_pattern, query_lower)
+        for match in matches:
+            filenames.append(match[0])  # match[0] is the full filename, match[1] is the extension
+        
+        # Pattern 2: Filename without extension (e.g., "test1", "document")
+        # This is more aggressive and might catch false positives
+        no_ext_pattern = r'\b([a-zA-Z0-9_\-\s]{2,20})\b'
+        no_ext_matches = re.findall(no_ext_pattern, query_lower)
+        
+        # Filter out common words that are unlikely to be filenames
+        common_words = {
+            'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+            'show', 'me', 'what', 'is', 'in', 'contains', 'summary', 'file', 'document',
+            'pdf', 'doc', 'txt', 'test', 'example', 'sample', 'this', 'that', 'these', 'those'
+        }
+        
+        for match in no_ext_matches:
+            if match not in common_words and len(match) >= 2:
+                filenames.append(match)
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_filenames = []
+        for filename in filenames:
+            if filename not in seen:
+                seen.add(filename)
+                unique_filenames.append(filename)
+        
+        return unique_filenames
+    
+    def _normalize_filename(self, filename: str) -> str:
+        """
+        Normalize a filename for comparison (lowercase, trim, remove extra spaces)
+        """
+        return re.sub(r'\s+', ' ', filename.lower().strip())
+    
+    def _calculate_filename_boost(self, result_filename: str, query_filenames: List[str]) -> float:
+        """
+        Calculate a boost score for a result based on filename matches.
+        Returns a boost multiplier (1.0 = no boost, higher = more boost)
+        """
+        if not query_filenames:
+            return 1.0
+        
+        result_normalized = self._normalize_filename(result_filename)
+        
+        for query_filename in query_filenames:
+            query_normalized = self._normalize_filename(query_filename)
+            
+            # Exact match (highest boost)
+            if result_normalized == query_normalized:
+                return 2.0
+            
+            # Filename without extension matches
+            result_name = result_normalized.rsplit('.', 1)[0] if '.' in result_normalized else result_normalized
+            query_name = query_normalized.rsplit('.', 1)[0] if '.' in query_normalized else query_normalized
+            
+            if result_name == query_name:
+                return 1.8
+            
+            # Contains match (partial filename)
+            if query_name in result_name or result_name in query_name:
+                return 1.5
+            
+            # Fuzzy match (case-insensitive substring)
+            if query_normalized in result_normalized or result_normalized in query_normalized:
+                return 1.3
+        
+        return 1.0
     
     def _get_embedding_function(self):
         """Get the embedding function for ChromaDB"""
@@ -457,6 +540,10 @@ class SearchService:
                 print("❌ Search service not initialized")
                 return []
                 
+            # Extract filenames from the query
+            query_filenames = self._extract_filenames_from_query(query)
+            print(f"🔗 Extracted filenames from query: {query_filenames}")
+            
             # Check collection count
             try:
                 count = self.collection.count()
@@ -485,16 +572,33 @@ class SearchService:
             search_results = []
             for i, (doc, meta, dist) in enumerate(zip(results['documents'][0], results['metadatas'][0], results['distances'][0])):
                 score = 1.0 - dist
-                print(f"📄 Match {i+1}: {meta.get('filename', 'Unknown')} (score: {score:.3f}, distance: {dist:.3f})")
+                filename_boost = self._calculate_filename_boost(meta.get("filename"), query_filenames)
+                final_score = score * filename_boost
+                print(f"📄 Match {i+1}: {meta.get('filename', 'Unknown')} (score: {final_score:.3f}, distance: {dist:.3f}, boost: {filename_boost:.2f})")
                 search_results.append({
                     "filename": meta.get("filename"),
                     "file_path": meta.get("file_path"),
                     "page": meta.get("page"),
                     "content": doc,
-                    "score": score
+                    "score": final_score,
+                    "original_score": score,
+                    "filename_boost": filename_boost
                 })
             
-            print(f"🎯 Returning {len(search_results)} search results")
+            # Re-rank results by final score (highest first)
+            search_results.sort(key=lambda x: x["score"], reverse=True)
+            
+            # Log filename boost summary
+            if query_filenames:
+                boosted_results = [r for r in search_results if r["filename_boost"] > 1.0]
+                if boosted_results:
+                    print(f"🚀 Applied filename boost to {len(boosted_results)} results for query filenames: {query_filenames}")
+                    for result in boosted_results[:3]:  # Show top 3 boosted results
+                        print(f"   📈 {result['filename']}: {result['original_score']:.3f} → {result['score']:.3f} (boost: {result['filename_boost']:.2f})")
+                else:
+                    print(f"ℹ️ No filename matches found for query filenames: {query_filenames}")
+            
+            print(f"🎯 Returning {len(search_results)} re-ranked search results")
             return search_results
             
         except Exception as e:
@@ -509,6 +613,126 @@ class SearchService:
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
+    
+    async def is_collection_empty(self) -> bool:
+        """Check if the ChromaDB collection is empty"""
+        try:
+            if not self.collection:
+                logger.warning("Collection not initialized, considering it empty")
+                return True
+            
+            count = self.collection.count()
+            logger.info(f"ChromaDB collection has {count} documents")
+            return count == 0
+        except Exception as e:
+            logger.error(f"Error checking collection count: {e}")
+            return True  # Consider empty if we can't check
+    
+    async def reindex_all_documents(self) -> dict:
+        """
+        Reindex all documents in the database if the collection is empty.
+        Returns a summary of the reindexing operation.
+        """
+        try:
+            logger.info("Starting full reindex of all documents...")
+            
+            # Get all documents from database
+            db = next(get_db())
+            all_documents = db.query(Document).all()
+            
+            if not all_documents:
+                logger.info("No documents found in database, skipping reindex")
+                return {
+                    "success": True,
+                    "message": "No documents found in database",
+                    "documents_processed": 0,
+                    "documents_indexed": 0,
+                    "chunks_created": 0
+                }
+            
+            logger.info(f"Found {len(all_documents)} documents in database")
+            
+            documents_processed = 0
+            documents_indexed = 0
+            total_chunks = 0
+            
+            for document in all_documents:
+                documents_processed += 1
+                logger.info(f"Processing document {documents_processed}/{len(all_documents)}: {document.filename}")
+                
+                # Check if document has content or summary
+                has_content = document.content and len(document.content.strip()) > 0
+                has_summary = document.summary and len(document.summary.strip()) > 0
+                
+                if not has_content and not has_summary:
+                    logger.warning(f"Skipping document {document.id} ({document.filename}) - no content or summary available")
+                    continue
+                
+                # Try to re-extract content if needed
+                content_to_index = document.content
+                if not has_content and has_summary:
+                    logger.info(f"Using summary for document {document.id} ({document.filename})")
+                    content_to_index = document.summary
+                elif not has_content:
+                    # Try to re-extract content from the file
+                    try:
+                        from services.file_service import FileService
+                        file_service = FileService()
+                        re_extracted_content = await file_service._extract_content(Path(document.file_path))
+                        
+                        if re_extracted_content and len(re_extracted_content.strip()) > 0:
+                            logger.info(f"Successfully re-extracted content for document {document.id} ({document.filename})")
+                            content_to_index = re_extracted_content
+                            
+                            # Update the document in database with the extracted content
+                            doc = db.query(Document).filter(Document.id == document.id).first()
+                            if doc:
+                                doc.content = content_to_index
+                                db.commit()
+                                logger.info(f"Updated document {document.id} with re-extracted content")
+                        else:
+                            logger.warning(f"Could not re-extract content for document {document.id} ({document.filename}) - skipping")
+                            continue
+                    except Exception as e:
+                        logger.error(f"Error re-extracting content for document {document.id} ({document.filename}): {e}")
+                        logger.warning(f"Skipping document {document.id} ({document.filename}) due to content extraction failure")
+                        continue
+                
+                # Index the document
+                try:
+                    await self.index_document(document)
+                    documents_indexed += 1
+                    
+                    # Get chunk count for this document (approximate)
+                    if content_to_index:
+                        # Rough estimate: assume ~500 characters per chunk
+                        estimated_chunks = max(1, len(content_to_index) // 500)
+                        total_chunks += estimated_chunks
+                    
+                    logger.info(f"Successfully indexed document {document.id} ({document.filename})")
+                except Exception as e:
+                    logger.error(f"Failed to index document {document.id} ({document.filename}): {e}")
+                    continue
+            
+            logger.info(f"Full reindex completed: {documents_indexed}/{documents_processed} documents indexed, ~{total_chunks} chunks created")
+            
+            return {
+                "success": True,
+                "message": f"Successfully reindexed {documents_indexed}/{documents_processed} documents",
+                "documents_processed": documents_processed,
+                "documents_indexed": documents_indexed,
+                "chunks_created": total_chunks
+            }
+            
+        except Exception as e:
+            logger.error(f"Full reindex failed: {e}")
+            return {
+                "success": False,
+                "message": f"Reindex failed: {str(e)}",
+                "documents_processed": 0,
+                "documents_indexed": 0,
+                "chunks_created": 0
+            }
     
     async def cleanup(self):
         """Cleanup resources"""

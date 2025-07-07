@@ -92,6 +92,22 @@ async def startup_event():
     collection_ready = search_service._collection is not None
     logger.info(f"Search service initialized, ChromaDB collection ready: {collection_ready}")
     
+    # Check if ChromaDB collection is empty and reindex if needed
+    if collection_ready:
+        is_empty = await search_service.is_collection_empty()
+        if is_empty:
+            logger.warning("ChromaDB collection is empty - triggering full reindex of all documents")
+            reindex_result = await search_service.reindex_all_documents()
+            if reindex_result["success"]:
+                logger.info(f"Full reindex completed: {reindex_result['message']}")
+                logger.info(f"  - Documents processed: {reindex_result['documents_processed']}")
+                logger.info(f"  - Documents indexed: {reindex_result['documents_indexed']}")
+                logger.info(f"  - Estimated chunks created: {reindex_result['chunks_created']}")
+            else:
+                logger.error(f"Full reindex failed: {reindex_result['message']}")
+        else:
+            logger.info("ChromaDB collection is already populated - skipping reindex")
+    
     # Initialize FileService only after SearchService is ready
     global file_service
     if collection_ready:

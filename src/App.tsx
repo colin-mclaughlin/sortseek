@@ -9,6 +9,7 @@ import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
 import { Document } from '@/lib/types'
 import { PDFViewer } from '@/components/PDFViewer'
 import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
+import { SemanticChat } from '@/components/SemanticChat'
 
 function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
@@ -159,15 +160,6 @@ function App(): React.JSX.Element {
             >
               <FileText className="h-4 w-4" />
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsSemanticSearchOpen(true)}
-              title="Semantic Search"
-            >
-              <Search className="h-4 w-4 mr-1" />
-              Semantic Search
-            </Button>
           </div>
         </div>
       </header>
@@ -215,27 +207,17 @@ function App(): React.JSX.Element {
 
         {/* Main Area */}
         <main className="flex-1 flex flex-col">
-          {/* Search Bar */}
-          <div className="p-6 border-b">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Search your documents..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
-
           {/* Content Area */}
-          <div className="flex-1 p-6">
-            <Tabs defaultValue="documents" className="h-full">
-              <TabsList className="grid w-full grid-cols-3">
+          <div className="flex-1">
+            <Tabs defaultValue="chat" className="h-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="chat">AI Chat</TabsTrigger>
                 <TabsTrigger value="documents">Documents</TabsTrigger>
-                <TabsTrigger value="search">Search Results</TabsTrigger>
-                <TabsTrigger value="insights">Insights</TabsTrigger>
               </TabsList>
+              
+              <TabsContent value="chat" className="mt-6 h-[calc(100vh-200px)]">
+                <SemanticChat />
+              </TabsContent>
               
               <TabsContent value="documents" className="mt-6">
                 <Card>
@@ -291,32 +273,6 @@ function App(): React.JSX.Element {
                         ))}
                       </div>
                     )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              
-              <TabsContent value="search" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Search Results</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground">
-                      Search results will appear here when you search for documents.
-                    </p>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              
-              <TabsContent value="insights" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Document Insights</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <p className="text-muted-foreground">
-                      AI-powered insights about your documents will appear here.
-                    </p>
                   </CardContent>
                 </Card>
               </TabsContent>

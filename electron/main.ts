@@ -211,14 +211,14 @@ ipcMain.handle('select-folder', async () => {
       const folderPath = result.filePaths[0]
       console.log('📁 Selected folder:', folderPath)
       
-      // Scan for PDF files in the selected folder
-      const pdfFiles = scanForPdfFiles(folderPath)
-      console.log(`📄 Found ${pdfFiles.length} PDF files`)
+      // Scan for supported files in the selected folder
+      const supportedFiles = scanForSupportedFiles(folderPath)
+      console.log(`📄 Found ${supportedFiles.length} supported files`)
       
       return {
         success: true,
         folderPath,
-        filePaths: pdfFiles
+        filePaths: supportedFiles
       }
     } else {
       console.log('📁 Folder selection cancelled')
@@ -309,7 +309,26 @@ ipcMain.handle('read-pdf-file', async (event, filePath: string) => {
   }
 })
 
-// Helper function to scan for PDF files in a folder
+// Helper function to scan for supported files in a folder
+function scanForSupportedFiles(folderPath: string): string[] {
+  try {
+    const files = readdirSync(folderPath)
+    const supportedExtensions = ['.pdf', '.docx', '.txt']
+    const supportedFiles = files
+      .filter(file => {
+        const extension = file.toLowerCase().substring(file.lastIndexOf('.'))
+        return supportedExtensions.includes(extension)
+      })
+      .map(file => join(folderPath, file))
+    
+    return supportedFiles
+  } catch (error) {
+    console.error('❌ Error scanning folder:', error)
+    return []
+  }
+}
+
+// Helper function to scan for PDF files in a folder (kept for backward compatibility)
 function scanForPdfFiles(folderPath: string): string[] {
   try {
     const files = readdirSync(folderPath)

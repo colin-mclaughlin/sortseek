@@ -179,20 +179,8 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
                 doc_dict = await file_service._import_single_file(Path(file_path))
                 
                 if doc_dict:
-                    # File service already handles indexing, but let's ensure it's indexed
-                    if not doc_dict.get("is_indexed", False):
-                        db = next(get_db())
-                        document = db.query(Document).filter(Document.id == doc_dict["id"]).first()
-                        if document and document.content and search_service:
-                            try:
-                                print(f"📥 Auto-indexing raw content for {document.filename}")
-                                await search_service.index_document(document)
-                                logger.info(f"Auto-indexing completed for document {document.id}: {document.filename}")
-                            except Exception as e:
-                                logger.warning(f"Failed to auto-index document {document.id} ({document.filename}): {e}")
-                    
                     imported_files.append(file_path)
-                    logger.info(f"Successfully imported and indexed: {file_path}")
+                    logger.info(f"Successfully imported: {file_path}")
                 else:
                     logger.warning(f"Failed to import file: {file_path}")
                 

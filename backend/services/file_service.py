@@ -40,18 +40,7 @@ class FileService:
             if file_path.is_file() and file_path.suffix.lower() in self.SUPPORTED_EXTENSIONS:
                 try:
                     doc_dict = await self._import_single_file(file_path)
-                    if doc_dict and not doc_dict.get("is_indexed", False):
-                        # Fetch the document from DB to pass to indexer
-                        db = next(get_db())
-                        document = db.query(Document).filter(Document.id == doc_dict["id"]).first()
-                        if document and self.search_service:
-                            try:
-                                await self.search_service.index_document(document)
-                                logger.info(f"Import and indexing completed for document {document.id}: {document.filename}")
-                            except Exception as e:
-                                logger.warning(f"Failed to index document {document.id} ({document.filename}): {e}")
-                        elif document and not self.search_service:
-                            logger.warning(f"Document {document.id} ({document.filename}) imported but not indexed - SearchService not available")
+                    if doc_dict:
                         imported_files.append(doc_dict)
                 except Exception as e:
                     logger.error(f"Failed to import {file_path}: {e}")
@@ -68,17 +57,6 @@ class FileService:
         
         try:
             doc_dict = await self._import_single_file(temp_path)
-            if doc_dict and not doc_dict.get("is_indexed", False):
-                db = next(get_db())
-                document = db.query(Document).filter(Document.id == doc_dict["id"]).first()
-                if document and self.search_service:
-                    try:
-                        await self.search_service.index_document(document)
-                        logger.info(f"Import and indexing completed for document {document.id}: {document.filename}")
-                    except Exception as e:
-                        logger.warning(f"Failed to index document {document.id} ({document.filename}): {e}")
-                elif document and not self.search_service:
-                    logger.warning(f"Document {document.id} ({document.filename}) imported but not indexed - SearchService not available")
             return doc_dict
         finally:
             if temp_path.exists():
@@ -112,7 +90,9 @@ class FileService:
                     text = page.extract_text()
                     if text:
                         text_parts.append(text)
-                return '\n'.join(text_parts)
+                content = '\n'.join(text_parts)
+                print(f"📄 Extracted content from PDF: {file_path.name} → {len(content)} chars")
+                return content
         except Exception as e:
             logger.error(f"Error extracting PDF content: {e}")
             return ""
@@ -158,19 +138,25 @@ class FileService:
             db.commit()
             db.refresh(document)
             logger.info(f"Successfully imported {file_path}")
-            # If PDF, index by page chunk
-            if file_path.suffix.lower() == '.pdf' and self.search_service:
-                page_chunks = await self.extract_pdf_chunks(file_path)
-                if page_chunks:
-                    chunk_texts = [text for (page, text) in page_chunks]
-                    chunk_metadatas = [{
-                        "document_id": document.id,
-                        "filename": document.filename,
-                        "file_path": document.file_path,
-                        "file_type": document.file_type,
-                        "page": page
-                    } for (page, text) in page_chunks]
-                    await self.search_service.index_document_chunks(document, chunk_texts, chunk_metadatas)
+            # Index the document based on file type
+            if self.search_service:
+                file_type = file_path.suffix.lower()
+                if file_type == '.pdf':
+                    # For PDFs, index by page chunks
+                    page_chunks = await self.extract_pdf_chunks(file_path)
+                    if page_chunks:
+                        chunk_texts = [text for (page, text) in page_chunks]
+                        chunk_metadatas = [{
+                            "document_id": document.id,
+                            "filename": document.filename,
+                            "file_path": document.file_path,
+                            "file_type": document.file_type,
+                            "page": page
+                        } for (page, text) in page_chunks]
+                        await self.search_service.index_document_chunks(document, chunk_texts, chunk_metadatas)
+                elif file_type in ['.docx', '.txt']:
+                    # For DOCX and TXT, index the entire document content
+                    await self.search_service.index_document(document)
             return document.to_dict()
         except Exception as e:
             logger.error(f"Error importing {file_path}: {e}")
@@ -184,7 +170,9 @@ class FileService:
             for paragraph in doc.paragraphs:
                 if paragraph.text.strip():
                     text_parts.append(paragraph.text)
-            return '\n'.join(text_parts)
+            content = '\n'.join(text_parts)
+            print(f"📄 Extracted content from DOCX: {file_path.name} → {len(content)} chars")
+            return content
         except Exception as e:
             logger.error(f"Error extracting DOCX content: {e}")
             return ""
@@ -193,12 +181,16 @@ class FileService:
         """Extract text content from TXT file"""
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
+                content = f.read()
+                print(f"📄 Extracted content from TXT: {file_path.name} → {len(content)} chars")
+                return content
         except UnicodeDecodeError:
             # Try with different encoding
             try:
                 with open(file_path, 'r', encoding='latin-1') as f:
-                    return f.read()
+                    content = f.read()
+                    print(f"📄 Extracted content from TXT (latin-1): {file_path.name} → {len(content)} chars")
+                    return content
             except Exception as e:
                 logger.error(f"Error reading TXT file with latin-1 encoding: {e}")
                 return ""

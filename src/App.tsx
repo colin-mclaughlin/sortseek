@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
 import { Document } from '@/lib/types'
 import { PDFViewer } from '@/components/PDFViewer'
+import { TextViewer } from '@/components/TextViewer'
 import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
 import { SemanticChat } from '@/components/SemanticChat'
 
@@ -19,8 +20,8 @@ function App(): React.JSX.Element {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isImporting, setIsImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
-  const [selectedPDF, setSelectedPDF] = useState<{ filePath: string; fileName: string } | null>(null)
-  const [isPDFViewerOpen, setIsPDFViewerOpen] = useState(false)
+  const [selectedDocument, setSelectedDocument] = useState<{ filePath: string; fileName: string; fileType: string; content?: string } | null>(null)
+  const [isDocumentViewerOpen, setIsDocumentViewerOpen] = useState(false)
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
 
   const checkBackendStatus = async () => {
@@ -54,10 +55,10 @@ function App(): React.JSX.Element {
       }
       
       console.log('Selected folder:', result.folderPath)
-      console.log('PDF files found:', result.filePaths)
+      console.log('Supported files found:', result.filePaths)
       
       if (!result.filePaths || result.filePaths.length === 0) {
-        throw new Error('No PDF files found in the selected folder')
+        throw new Error('No supported files (.pdf, .docx, .txt) found in the selected folder')
       }
       
       // Send file paths to backend
@@ -90,22 +91,31 @@ function App(): React.JSX.Element {
     }
   }
 
-  const handleViewPDF = (doc: Document) => {
-    setSelectedPDF({ filePath: doc.file_path, fileName: doc.filename })
-    setIsPDFViewerOpen(true)
+  const handleViewDocument = (doc: Document) => {
+    setSelectedDocument({ 
+      filePath: doc.file_path, 
+      fileName: doc.filename, 
+      fileType: doc.file_type,
+      content: doc.content
+    })
+    setIsDocumentViewerOpen(true)
   }
 
-  const handleClosePDFViewer = () => {
-    setIsPDFViewerOpen(false)
-    setSelectedPDF(null)
+  const handleCloseDocumentViewer = () => {
+    setIsDocumentViewerOpen(false)
+    setSelectedDocument(null)
   }
 
-  // Debug function to test PDF viewer
-  const handleTestPDFViewer = () => {
-    // Test with a sample PDF path - you can replace this with an actual PDF path
+  // Debug function to test document viewer
+  const handleTestDocumentViewer = () => {
+    // Test with a sample document path - you can replace this with an actual document path
     const testPath = 'C:/test.pdf' // Replace with actual path for testing
-    setSelectedPDF({ filePath: testPath, fileName: 'Test PDF' })
-    setIsPDFViewerOpen(true)
+    setSelectedDocument({ 
+      filePath: testPath, 
+      fileName: 'Test Document',
+      fileType: '.pdf'
+    })
+    setIsDocumentViewerOpen(true)
   }
 
   useEffect(() => {
@@ -155,8 +165,8 @@ function App(): React.JSX.Element {
             <Button 
               variant="ghost" 
               size="icon" 
-              onClick={handleTestPDFViewer}
-              title="Test PDF Viewer"
+              onClick={handleTestDocumentViewer}
+              title="Test Document Viewer"
             >
               <FileText className="h-4 w-4" />
             </Button>
@@ -252,7 +262,9 @@ function App(): React.JSX.Element {
                               <FileText className="h-5 w-5 text-muted-foreground" />
                               <div>
                                 <p className="font-medium">{doc.filename}</p>
-                                <p className="text-sm text-muted-foreground">{doc.file_path}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {doc.file_path} • {doc.file_type.toUpperCase()}
+                                </p>
                               </div>
                             </div>
                             <div className="flex items-center space-x-2">
@@ -262,8 +274,9 @@ function App(): React.JSX.Element {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleViewPDF(doc)}
+                                onClick={() => handleViewDocument(doc)}
                                 className="ml-2"
+                                title="View document"
                               >
                                 <Eye className="h-4 w-4 mr-1" />
                                 View
@@ -281,14 +294,25 @@ function App(): React.JSX.Element {
         </main>
       </div>
 
-      {/* PDF Viewer Modal */}
-      {selectedPDF && (
-        <PDFViewer
-          isOpen={isPDFViewerOpen}
-          onClose={handleClosePDFViewer}
-          filePath={selectedPDF.filePath}
-          fileName={selectedPDF.fileName}
-        />
+      {/* Document Viewer Modal */}
+      {selectedDocument && (
+        selectedDocument.fileType === '.pdf' ? (
+          <PDFViewer
+            isOpen={isDocumentViewerOpen}
+            onClose={handleCloseDocumentViewer}
+            filePath={selectedDocument.filePath}
+            fileName={selectedDocument.fileName}
+          />
+        ) : (
+          <TextViewer
+            isOpen={isDocumentViewerOpen}
+            onClose={handleCloseDocumentViewer}
+            filePath={selectedDocument.filePath}
+            fileName={selectedDocument.fileName}
+            fileType={selectedDocument.fileType}
+            content={selectedDocument.content}
+          />
+        )
       )}
       <SemanticSearchPanel
         isOpen={isSemanticSearchOpen}

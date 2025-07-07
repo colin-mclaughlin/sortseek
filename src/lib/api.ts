@@ -11,6 +11,23 @@ export interface ApiError {
 
 import { ImportFolderRequest, ImportFolderResponse, DocumentsResponse } from '@/lib/types'
 
+export interface SummarizeRequest {
+  filePath: string
+  maxPages?: number
+}
+
+export interface PageSummary {
+  page: number
+  summary: string
+}
+
+export interface SummarizeResponse {
+  success: boolean
+  message: string
+  summaries: PageSummary[]
+  totalPages: number
+}
+
 /**
  * Check if the backend is running by calling the /ping endpoint
  */
@@ -118,6 +135,35 @@ export async function getDocuments(): Promise<DocumentsResponse> {
       error instanceof Error 
         ? error.message 
         : 'Failed to get documents'
+    )
+  }
+}
+
+/**
+ * Summarize a PDF document by pages using AI
+ */
+export async function summarizeDocument(request: SummarizeRequest): Promise<SummarizeResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/summarize-document`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data as SummarizeResponse
+  } catch (error) {
+    console.error('Failed to summarize document:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to summarize document'
     )
   }
 } 

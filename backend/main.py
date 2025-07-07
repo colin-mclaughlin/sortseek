@@ -28,6 +28,20 @@ class ImportFolderResponse(BaseModel):
     importedFiles: List[str]
     count: int
 
+class SummarizeRequest(BaseModel):
+    filePath: str
+    maxPages: int = 5
+
+class PageSummary(BaseModel):
+    page: int
+    summary: str
+
+class SummarizeResponse(BaseModel):
+    success: bool
+    message: str
+    summaries: List[PageSummary]
+    totalPages: int
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -292,6 +306,89 @@ async def suggest_folder(content: str, current_path: Optional[str] = None):
         return {"suggested_folder": suggestion}
     except Exception as e:
         logger.error(f"Folder suggestion failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/summarize-document")
+async def summarize_document(request: SummarizeRequest):
+    """Summarize a PDF document by pages using AI"""
+    try:
+        logger.info(f"Received summarization request for: {request.filePath}")
+        
+        if not ai_service.is_available():
+            raise HTTPException(status_code=503, detail="AI service not available")
+        
+        if not os.path.exists(request.filePath):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Import fitz here to avoid issues if PyMuPDF is not installed
+        try:
+            import fitz
+        except ImportError:
+            raise HTTPException(status_code=500, detail="PyMuPDF not available")
+        
+        # Open the PDF document
+        doc = fitz.open(request.filePath)
+        total_pages = len(doc)
+        logger.info(f"PDF has {total_pages} pages")
+        
+        # Limit to maxPages for performance
+        pages_to_summarize = min(request.maxPages, total_pages)
+        summaries = []
+        
+        for page_num in range(pages_to_summarize):
+            try:
+                logger.info(f"Processing page {page_num + 1}")
+                
+                # Get the page
+                page = doc.load_page(page_num)
+                
+                # Extract text from the page
+                text = page.get_text()
+                
+                if not text.strip():
+                    logger.warning(f"Page {page_num + 1} has no text content")
+                    summaries.append(PageSummary(
+                        page=page_num + 1,
+                        summary="No text content found on this page."
+                    ))
+                    continue
+                
+                # Truncate text if too long for API
+                if len(text) > 3000:
+                    text = text[:3000] + "..."
+                
+                logger.info(f"Page {page_num + 1} text length: {len(text)} characters")
+                
+                # Generate summary using AI
+                summary = await ai_service.summarize_text(text, max_length=300)
+                
+                summaries.append(PageSummary(
+                    page=page_num + 1,
+                    summary=summary
+                ))
+                
+                logger.info(f"Generated summary for page {page_num + 1}")
+                
+            except Exception as e:
+                logger.error(f"Error processing page {page_num + 1}: {e}")
+                summaries.append(PageSummary(
+                    page=page_num + 1,
+                    summary=f"Error processing this page: {str(e)}"
+                ))
+        
+        doc.close()
+        
+        logger.info(f"Successfully summarized {len(summaries)} pages")
+        
+        return SummarizeResponse(
+            success=True,
+            message=f"Successfully summarized {len(summaries)} pages",
+            summaries=summaries,
+            totalPages=total_pages
+        )
+        
+    except Exception as e:
+        logger.error(f"Document summarization failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

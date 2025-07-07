@@ -1,9 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { Document, Page } from 'react-pdf'
 import { pdfjs } from 'react-pdf'
-import { ChevronLeft, ChevronRight, Loader2, FileText, AlertCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2, FileText, AlertCircle, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { SummarizationModal } from '@/components/SummarizationModal'
 
 // Set up PDF.js worker for Electron - use local worker to avoid CSP issues
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.js'
@@ -29,6 +30,7 @@ export function PDFViewer({ isOpen, onClose, filePath, fileName }: PDFViewerProp
   const [pdfData, setPdfData] = useState<Uint8Array | null>(null)
   const [documentLoading, setDocumentLoading] = useState<boolean>(false)
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [isSummarizationOpen, setIsSummarizationOpen] = useState(false)
 
   // Load PDF file when component mounts or filePath changes
   useEffect(() => {
@@ -120,8 +122,14 @@ export function PDFViewer({ isOpen, onClose, filePath, fileName }: PDFViewerProp
     setPdfData(null)
     setNumPages(0)
     setPdfUrl(null)
+    setIsSummarizationOpen(false)
     onClose()
   }, [onClose])
+
+  const handleSummarize = useCallback(() => {
+    console.log('🔄 PDFViewer: Opening summarization modal')
+    setIsSummarizationOpen(true)
+  }, [])
 
   // Debug logging
   useEffect(() => {
@@ -172,6 +180,19 @@ export function PDFViewer({ isOpen, onClose, filePath, fileName }: PDFViewerProp
               >
                 Next
                 <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleSummarize}
+                disabled={documentLoading || loading}
+                className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
+              >
+                <Sparkles className="h-4 w-4 mr-1" />
+                Summarize
               </Button>
             </div>
           </div>
@@ -257,6 +278,14 @@ export function PDFViewer({ isOpen, onClose, filePath, fileName }: PDFViewerProp
           </div>
         </div>
       </DialogContent>
+      
+      {/* Summarization Modal */}
+      <SummarizationModal
+        isOpen={isSummarizationOpen}
+        onClose={() => setIsSummarizationOpen(false)}
+        filePath={filePath}
+        fileName={fileName}
+      />
     </Dialog>
   )
 } 

@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 import openai
 from dotenv import load_dotenv
+import difflib
 
 # Load environment variables
 load_dotenv()
@@ -14,7 +15,7 @@ class AIService:
     
     def __init__(self):
         self.client = None
-        self.is_available = False
+        self._is_available = False
         self._initialize_openai()
     
     def _initialize_openai(self):
@@ -24,50 +25,101 @@ class AIService:
             if api_key:
                 openai.api_key = api_key
                 self.client = openai
-                self.is_available = True
+                self._is_available = True
                 logger.info("OpenAI client initialized successfully")
             else:
                 logger.warning("OpenAI API key not found. AI features will be disabled.")
-                self.is_available = False
+                self._is_available = False
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
-            self.is_available = False
+            self._is_available = False
     
     def is_available(self) -> bool:
         """Check if AI service is available"""
-        return self.is_available and self.client is not None
+        return self._is_available and self.client is not None
     
-    async def summarize_text(self, text: str, max_length: int = 200) -> str:
-        """Summarize text using OpenAI GPT-4"""
+    async def summarize_text(self, text: str, max_length: int = 300) -> str:
+        """Summarize text using OpenAI GPT-4, with chunking and quality checks"""
         if not self.is_available():
+            logger.warning("AI unavailable, using fallback summarization.")
             return self._fallback_summarize(text, max_length)
-        
+
+        def is_meaningful(summary: str, original: str) -> bool:
+            if not summary.strip():
+                return False
+            # If summary is too similar to original, it's not meaningful
+            ratio = difflib.SequenceMatcher(None, summary.strip().lower(), original.strip().lower()).ratio()
+            return ratio < 0.85 and len(summary.strip()) > 10
+
         try:
-            # Truncate text if too long for API
-            if len(text) > 4000:
-                text = text[:4000] + "..."
-            
-            response = await self.client.ChatCompletion.acreate(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are a helpful assistant that creates concise summaries. Create a summary of no more than {max_length} characters."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Please summarize the following text:\n\n{text}"
-                    }
-                ],
-                max_tokens=150,
-                temperature=0.3
-            )
-            
-            summary = response.choices[0].message.content.strip()
-            return summary
-            
+            # Split into subchunks if too long for OpenAI
+            max_chunk_size = 3000
+            subchunks = [text[i:i+max_chunk_size] for i in range(0, len(text), max_chunk_size)]
+            chunk_summaries = []
+            for idx, chunk in enumerate(subchunks):
+                logger.info(f"Summarizing subchunk {idx+1}/{len(subchunks)} (length: {len(chunk)})")
+                response = await self.client.ChatCompletion.acreate(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a document assistant summarizing legal clauses. "
+                                "Summarize this clause in plain language. Highlight the key point without repeating the full text verbatim. "
+                                "Be concise and helpful. If the text is not meaningful, say 'No meaningful summary available.'"
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Summarize this clause:\n\n{chunk}"
+                        }
+                    ],
+                    max_tokens=300,
+                    temperature=0.3
+                )
+                summary = response.choices[0].message.content.strip()
+                logger.info(f"OpenAI subchunk summary: {summary[:100]}...")
+                if is_meaningful(summary, chunk):
+                    chunk_summaries.append(summary)
+                else:
+                    logger.warning(f"Subchunk summary not meaningful or too similar to input. Skipping.")
+            if not chunk_summaries:
+                logger.warning("No meaningful summaries generated for any subchunk.")
+                return "No meaningful summary generated for this page."
+            # If multiple chunk summaries, combine and summarize again for the page
+            if len(chunk_summaries) > 1:
+                combined = "\n".join(chunk_summaries)
+                logger.info("Combining subchunk summaries for final page summary.")
+                response = await self.client.ChatCompletion.acreate(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a document assistant. Combine the following summaries into a single, concise summary in plain language. "
+                                "Highlight the key points."
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Combine and summarize:\n\n{combined}"
+                        }
+                    ],
+                    max_tokens=300,
+                    temperature=0.3
+                )
+                final_summary = response.choices[0].message.content.strip()
+                if is_meaningful(final_summary, text):
+                    logger.info(f"Final combined summary: {final_summary[:100]}...")
+                    return final_summary
+                else:
+                    logger.warning("Final combined summary not meaningful. Returning chunk summaries joined.")
+                    return " ".join(chunk_summaries)
+            else:
+                return chunk_summaries[0]
         except Exception as e:
             logger.error(f"OpenAI summarization failed: {e}")
+            logger.warning("Using fallback summarization due to OpenAI error.")
             return self._fallback_summarize(text, max_length)
     
     def _fallback_summarize(self, text: str, max_length: int) -> str:

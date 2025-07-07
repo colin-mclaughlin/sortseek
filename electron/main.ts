@@ -1,6 +1,6 @@
 import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron'
 import { join } from 'path'
-import { existsSync, readdirSync } from 'fs'
+import { existsSync, readdirSync, readFileSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 // import icon from '../../resources/icon.png?asset'
 
@@ -259,6 +259,49 @@ ipcMain.handle('import-folder', async (event, filePaths: string[]) => {
     return result
   } catch (error) {
     console.error('❌ Error importing folder:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+})
+
+// IPC handler for reading PDF files
+ipcMain.handle('read-pdf-file', async (event, filePath: string) => {
+  try {
+    console.log('📄 Reading PDF file:', filePath)
+    
+    // Check if file exists
+    if (!existsSync(filePath)) {
+      console.error('❌ File not found:', filePath)
+      throw new Error(`File not found: ${filePath}`)
+    }
+    
+    // Read file as binary buffer
+    const buffer = readFileSync(filePath)
+    console.log(`📄 File read: ${buffer.length} bytes`)
+    
+    // Check if it's actually a PDF by examining the header
+    const header = buffer.slice(0, 4).toString('ascii')
+    console.log('📄 File header:', header)
+    
+    if (header !== '%PDF') {
+      console.error('❌ File is not a valid PDF:', header)
+      throw new Error('File does not appear to be a valid PDF')
+    }
+    
+    const uint8Array = new Uint8Array(buffer)
+    const dataArray = Array.from(uint8Array)
+    
+    console.log(`✅ PDF file read successfully: ${uint8Array.length} bytes`)
+    console.log(`📄 First 10 bytes:`, dataArray.slice(0, 10))
+    
+    return {
+      success: true,
+      data: dataArray
+    }
+  } catch (error) {
+    console.error('❌ Error reading PDF file:', error)
     return {
       success: false,
       message: error instanceof Error ? error.message : 'Unknown error'

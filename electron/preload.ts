@@ -11,7 +11,8 @@ const api = {
   },
   fileSystem: {
     selectFolder: () => ipcRenderer.invoke('select-folder'),
-    importFolder: (filePaths: string[]) => ipcRenderer.invoke('import-folder', filePaths)
+    importFolder: (filePaths: string[]) => ipcRenderer.invoke('import-folder', filePaths),
+    readPdfFile: (filePath: string) => ipcRenderer.invoke('read-pdf-file', filePath)
   }
 }
 

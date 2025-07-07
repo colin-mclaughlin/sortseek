@@ -32,7 +32,7 @@
   "include": [
     "src",
     "electron",
-    "vite.config.ts"
+    "src/lib/electron.d.ts"
   ],
   "references": [{ "path": "./tsconfig.node.json" }]
 } 

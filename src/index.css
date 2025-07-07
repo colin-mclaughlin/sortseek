@@ -56,4 +56,62 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* React PDF Styles */
+.react-pdf__Document {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.react-pdf__Page {
+  margin: 1em 0;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+  display: block;
+}
+
+.react-pdf__Page__canvas {
+  display: block;
+  user-select: none;
+  max-width: 100%;
+  height: auto;
+}
+
+.react-pdf__Page__textContent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1.0;
+}
+
+.react-pdf__Page__textContent--disabled {
+  opacity: 0;
+}
+
+.react-pdf__Page__annotations {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  opacity: 0.2;
+  line-height: 1.0;
+}
+
+.react-pdf__Page__annotations--disabled {
+  opacity: 0;
+}
+
+/* Ensure PDF content is visible */
+.react-pdf__Page__svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
 } 

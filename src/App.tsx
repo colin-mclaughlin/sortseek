@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react'
-import { Search, FolderOpen, FileText, Settings, Menu, RefreshCw, Loader2 } from 'lucide-react'
+import { Search, FolderOpen, FileText, Settings, RefreshCw, Loader2, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { getBackendStatus, getBackendHealth, importFolder, getDocuments } from '@/lib/api'
+import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
 import { Document } from '@/lib/types'
+import { PDFViewer } from '@/components/PDFViewer'
 
 function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
@@ -16,6 +17,8 @@ function App(): React.JSX.Element {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isImporting, setIsImporting] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const [selectedPDF, setSelectedPDF] = useState<{ filePath: string; fileName: string } | null>(null)
+  const [isPDFViewerOpen, setIsPDFViewerOpen] = useState(false)
 
   const checkBackendStatus = async () => {
     setIsCheckingBackend(true)
@@ -50,12 +53,12 @@ function App(): React.JSX.Element {
       console.log('Selected folder:', result.folderPath)
       console.log('PDF files found:', result.filePaths)
       
-      if (result.filePaths.length === 0) {
+      if (!result.filePaths || result.filePaths.length === 0) {
         throw new Error('No PDF files found in the selected folder')
       }
       
       // Send file paths to backend
-      const importResult = await importFolder(result.filePaths)
+      const importResult = await importFolder(result.filePaths!)
       
       if (!importResult.success) {
         throw new Error(importResult.message || 'Failed to import files')
@@ -82,6 +85,24 @@ function App(): React.JSX.Element {
     } catch (error) {
       console.error('Failed to load documents:', error)
     }
+  }
+
+  const handleViewPDF = (doc: Document) => {
+    setSelectedPDF({ filePath: doc.file_path, fileName: doc.filename })
+    setIsPDFViewerOpen(true)
+  }
+
+  const handleClosePDFViewer = () => {
+    setIsPDFViewerOpen(false)
+    setSelectedPDF(null)
+  }
+
+  // Debug function to test PDF viewer
+  const handleTestPDFViewer = () => {
+    // Test with a sample PDF path - you can replace this with an actual PDF path
+    const testPath = 'C:/test.pdf' // Replace with actual path for testing
+    setSelectedPDF({ filePath: testPath, fileName: 'Test PDF' })
+    setIsPDFViewerOpen(true)
   }
 
   useEffect(() => {
@@ -127,6 +148,14 @@ function App(): React.JSX.Element {
             </Button>
             <Button variant="ghost" size="icon">
               <Settings className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={handleTestPDFViewer}
+              title="Test PDF Viewer"
+            >
+              <FileText className="h-4 w-4" />
             </Button>
           </div>
         </div>
@@ -233,8 +262,19 @@ function App(): React.JSX.Element {
                                 <p className="text-sm text-muted-foreground">{doc.file_path}</p>
                               </div>
                             </div>
-                            <div className="text-sm text-muted-foreground">
-                              {(doc.file_size / 1024 / 1024).toFixed(2)} MB
+                            <div className="flex items-center space-x-2">
+                              <div className="text-sm text-muted-foreground">
+                                {(doc.file_size / 1024 / 1024).toFixed(2)} MB
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleViewPDF(doc)}
+                                className="ml-2"
+                              >
+                                <Eye className="h-4 w-4 mr-1" />
+                                View
+                              </Button>
                             </div>
                           </div>
                         ))}
@@ -273,6 +313,16 @@ function App(): React.JSX.Element {
           </div>
         </main>
       </div>
+
+      {/* PDF Viewer Modal */}
+      {selectedPDF && (
+        <PDFViewer
+          isOpen={isPDFViewerOpen}
+          onClose={handleClosePDFViewer}
+          filePath={selectedPDF.filePath}
+          fileName={selectedPDF.fileName}
+        />
+      )}
     </div>
   )
 }

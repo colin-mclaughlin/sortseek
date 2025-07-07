@@ -5,9 +5,13 @@ import logging
 import chromadb
 from chromadb.config import Settings
 import numpy as np
+import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from database import get_db
 from models import Document, SearchResult
+from langchain.embeddings import OpenAIEmbeddings
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +134,38 @@ class SearchService:
         
         return embedding
     
+    def _get_openai_embedding(self, text: str) -> list:
+        """Get OpenAI embedding for a text chunk using LangChain"""
+        try:
+            api_key = os.getenv("OPENAI_API_KEY")
+            embedder = OpenAIEmbeddings(openai_api_key=api_key) if api_key else OpenAIEmbeddings()
+            embedding = embedder.embed_query(text)
+            return embedding
+        except Exception as e:
+            logger.error(f"OpenAI embedding failed: {e}")
+            return self._create_simple_embedding(text)
+
+    async def index_document_chunks(self, document: Document, chunks: list, chunk_metadatas: list):
+        """Index a list of text chunks for a document, with metadata for each chunk"""
+        try:
+            if not chunks or not any(c.strip() for c in chunks):
+                logger.warning(f"Document {document.id} has no content chunks to index")
+                return
+            if self._collection is None:
+                logger.error("ChromaDB collection is not initialized. Cannot index document chunks.")
+                return
+            embeddings = [self._get_openai_embedding(chunk) for chunk in chunks]
+            ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(chunks))]
+            self._collection.add(
+                embeddings=embeddings,
+                documents=chunks,
+                metadatas=chunk_metadatas,
+                ids=ids
+            )
+            logger.info(f"Indexed {len(chunks)} chunks for document {document.id}: {document.filename}")
+        except Exception as e:
+            logger.error(f"Error indexing document chunks for {document.id}: {e}")
+    
     async def search_documents(self, query: str, skip: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
         """Search documents using semantic search"""
         try:
@@ -229,6 +265,36 @@ class SearchService:
         except Exception as e:
             logger.error(f"Error finding matching snippet: {e}")
             return content[:max_length] + "..." if len(content) > max_length else content
+    
+    async def semantic_search(self, query: str, top_k: int = 5) -> list:
+        """Semantic search for top_k relevant chunks using OpenAI embeddings and ChromaDB"""
+        try:
+            if not self.collection:
+                logger.error("Search service not initialized")
+                return []
+            query_embedding = self._get_openai_embedding(query)
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                include=["documents", "metadatas", "distances"]
+            )
+            if not results or not results.get('documents') or not results['documents'][0]:
+                logger.warning("ChromaDB returned no matches for semantic search.")
+                return []
+            search_results = []
+            for doc, meta, dist in zip(results['documents'][0], results['metadatas'][0], results['distances'][0]):
+                score = 1.0 - dist
+                search_results.append({
+                    "filename": meta.get("filename"),
+                    "file_path": meta.get("file_path"),
+                    "page": meta.get("page"),
+                    "content": doc,
+                    "score": score
+                })
+            return search_results
+        except Exception as e:
+            logger.error(f"Semantic search failed: {e}")
+            return []
     
     async def is_healthy(self) -> bool:
         """Check if the search service is healthy"""

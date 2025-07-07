@@ -28,10 +28,19 @@ export interface SummarizeResponse {
   totalPages: number
 }
 
+export interface SemanticSearchResult {
+  filename: string
+  file_path: string
+  page?: number
+  content: string
+  score: number
+}
+
 /**
  * Check if the backend is running by calling the /ping endpoint
  */
 export async function getBackendStatus(): Promise<BackendStatus> {
+  console.log('[API] getBackendStatus called')
   try {
     const response = await fetch(`${API_BASE_URL}/ping`, {
       method: 'GET',
@@ -41,13 +50,15 @@ export async function getBackendStatus(): Promise<BackendStatus> {
     })
 
     if (!response.ok) {
+      console.error(`[API] getBackendStatus HTTP error: ${response.status}`)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
     const data = await response.json()
+    console.log('[API] getBackendStatus response:', data)
     return data as BackendStatus
   } catch (error) {
-    console.error('Failed to check backend status:', error)
+    console.error('[API] getBackendStatus failed:', error)
     throw new Error(
       error instanceof Error 
         ? error.message 
@@ -164,6 +175,30 @@ export async function summarizeDocument(request: SummarizeRequest): Promise<Summ
       error instanceof Error 
         ? error.message 
         : 'Failed to summarize document'
+    )
+  }
+} 
+
+export async function semanticSearch(query: string): Promise<SemanticSearchResult[]> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/semantic-search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    })
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    return data.results as SemanticSearchResult[]
+  } catch (error) {
+    console.error('Failed to perform semantic search:', error)
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : 'Failed to perform semantic search'
     )
   }
 } 

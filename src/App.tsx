@@ -8,6 +8,7 @@ import { Separator } from '@/components/ui/separator'
 import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
 import { Document } from '@/lib/types'
 import { PDFViewer } from '@/components/PDFViewer'
+import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
 
 function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
@@ -19,6 +20,7 @@ function App(): React.JSX.Element {
   const [importError, setImportError] = useState<string | null>(null)
   const [selectedPDF, setSelectedPDF] = useState<{ filePath: string; fileName: string } | null>(null)
   const [isPDFViewerOpen, setIsPDFViewerOpen] = useState(false)
+  const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
 
   const checkBackendStatus = async () => {
     setIsCheckingBackend(true)
@@ -133,7 +135,7 @@ function App(): React.JSX.Element {
               </span>
               {backendError && (
                 <span className="text-xs text-red-500 ml-2" title={backendError}>
-                  Error
+                  {backendError}
                 </span>
               )}
             </div>
@@ -156,6 +158,15 @@ function App(): React.JSX.Element {
               title="Test PDF Viewer"
             >
               <FileText className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsSemanticSearchOpen(true)}
+              title="Semantic Search"
+            >
+              <Search className="h-4 w-4 mr-1" />
+              Semantic Search
             </Button>
           </div>
         </div>
@@ -323,6 +334,10 @@ function App(): React.JSX.Element {
           fileName={selectedPDF.fileName}
         />
       )}
+      <SemanticSearchPanel
+        isOpen={isSemanticSearchOpen}
+        onClose={() => setIsSemanticSearchOpen(false)}
+      />
     </div>
   )
 }

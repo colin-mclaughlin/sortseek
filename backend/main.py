@@ -42,6 +42,21 @@ class SummarizeResponse(BaseModel):
     summaries: List[PageSummary]
     totalPages: int
 
+class SemanticSearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+class SemanticSearchResult(BaseModel):
+    filename: str
+    file_path: str
+    page: int = None
+    content: str
+    score: float
+
+class SemanticSearchResponse(BaseModel):
+    results: list
+    count: int
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,7 +70,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],  # Allow all origins for Electron
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -277,6 +292,18 @@ async def search_documents(
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/semantic-search")
+async def semantic_search(request: SemanticSearchRequest):
+    """Semantic search over imported documents using ChromaDB and OpenAI embeddings"""
+    try:
+        logger.info(f"Received semantic search query: {request.query}")
+        results = await search_service.semantic_search(request.query, top_k=request.top_k)
+        logger.info(f"Semantic search returned {len(results)} results")
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"Semantic search failed: {e}")
+        return {"results": [], "count": 0, "error": str(e)}
 
 @app.post("/summarize")
 async def summarize_text(text: str, max_length: int = 200):

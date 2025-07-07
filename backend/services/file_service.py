@@ -84,43 +84,6 @@ class FileService:
             if temp_path.exists():
                 temp_path.unlink()
     
-    async def _import_single_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
-        """Import a single file and extract its content"""
-        try:
-            # Check if file already exists in database
-            db = next(get_db())
-            existing_doc = db.query(Document).filter(Document.file_path == str(file_path)).first()
-            if existing_doc:
-                logger.info(f"File {file_path} already imported")
-                return existing_doc.to_dict()
-            
-            # Extract content based on file type
-            content = await self._extract_content(file_path)
-            if not content:
-                logger.warning(f"Could not extract content from {file_path}")
-                return None
-            
-            # Create document record
-            document = Document(
-                filename=file_path.name,
-                file_path=str(file_path),
-                file_type=file_path.suffix.lower(),
-                file_size=file_path.stat().st_size,
-                content=content,
-                is_indexed=False
-            )
-            
-            db.add(document)
-            db.commit()
-            db.refresh(document)
-            
-            logger.info(f"Successfully imported {file_path}")
-            return document.to_dict()
-            
-        except Exception as e:
-            logger.error(f"Error importing {file_path}: {e}")
-            return None
-    
     async def _extract_content(self, file_path: Path) -> Optional[str]:
         """Extract text content from different file types"""
         try:
@@ -141,7 +104,7 @@ class FileService:
             return None
     
     async def _extract_pdf_content(self, file_path: Path) -> str:
-        """Extract text content from PDF file"""
+        """Extract text content from PDF file and return joined text (for legacy use)"""
         try:
             with pdfplumber.open(file_path) as pdf:
                 text_parts = []
@@ -153,6 +116,65 @@ class FileService:
         except Exception as e:
             logger.error(f"Error extracting PDF content: {e}")
             return ""
+
+    async def extract_pdf_chunks(self, file_path: Path) -> list:
+        """Extract text content from PDF file, split by page, and return list of chunks"""
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                chunks = []
+                for i, page in enumerate(pdf.pages):
+                    text = page.extract_text()
+                    if text and text.strip():
+                        chunks.append((i+1, text.strip()))
+                return chunks
+        except Exception as e:
+            logger.error(f"Error extracting PDF chunks: {e}")
+            return []
+
+    async def _import_single_file(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """Import a single file and extract its content, then index by chunk if PDF"""
+        try:
+            # Check if file already exists in database
+            db = next(get_db())
+            existing_doc = db.query(Document).filter(Document.file_path == str(file_path)).first()
+            if existing_doc:
+                logger.info(f"File {file_path} already imported")
+                return existing_doc.to_dict()
+            # Extract content based on file type
+            content = await self._extract_content(file_path)
+            if not content:
+                logger.warning(f"Could not extract content from {file_path}")
+                return None
+            # Create document record
+            document = Document(
+                filename=file_path.name,
+                file_path=str(file_path),
+                file_type=file_path.suffix.lower(),
+                file_size=file_path.stat().st_size,
+                content=content,
+                is_indexed=False
+            )
+            db.add(document)
+            db.commit()
+            db.refresh(document)
+            logger.info(f"Successfully imported {file_path}")
+            # If PDF, index by page chunk
+            if file_path.suffix.lower() == '.pdf' and self.search_service:
+                page_chunks = await self.extract_pdf_chunks(file_path)
+                if page_chunks:
+                    chunk_texts = [text for (page, text) in page_chunks]
+                    chunk_metadatas = [{
+                        "document_id": document.id,
+                        "filename": document.filename,
+                        "file_path": document.file_path,
+                        "file_type": document.file_type,
+                        "page": page
+                    } for (page, text) in page_chunks]
+                    await self.search_service.index_document_chunks(document, chunk_texts, chunk_metadatas)
+            return document.to_dict()
+        except Exception as e:
+            logger.error(f"Error importing {file_path}: {e}")
+            return None
     
     async def _extract_docx_content(self, file_path: Path) -> str:
         """Extract text content from DOCX file"""

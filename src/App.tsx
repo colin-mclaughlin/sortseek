@@ -7,8 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
 import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
 import { Document } from '@/lib/types'
-import { PDFViewer } from '@/components/PDFViewer'
-import { TextViewer } from '@/components/TextViewer'
+import { IntegratedDocumentViewer } from '@/components/IntegratedDocumentViewer'
 import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
 import { SemanticChat } from '@/components/SemanticChat'
 
@@ -299,33 +298,16 @@ function App(): React.JSX.Element {
         </main>
       </div>
 
-      {/* Document Viewer Modal */}
+      {/* Integrated Document Viewer Modal */}
       {selectedDocument && (
-        (() => {
-          console.log('🔍 Document viewer routing:', {
-            fileType: selectedDocument.fileType,
-            fileName: selectedDocument.fileName,
-            isPDF: selectedDocument.fileType === '.pdf'
-          })
-          
-          return selectedDocument.fileType === '.pdf' ? (
-            <PDFViewer
-              isOpen={isDocumentViewerOpen}
-              onClose={handleCloseDocumentViewer}
-              filePath={selectedDocument.filePath}
-              fileName={selectedDocument.fileName}
-            />
-          ) : (
-            <TextViewer
-              isOpen={isDocumentViewerOpen}
-              onClose={handleCloseDocumentViewer}
-              filePath={selectedDocument.filePath}
-              fileName={selectedDocument.fileName}
-              fileType={selectedDocument.fileType}
-              content={selectedDocument.content}
-            />
-          )
-        })()
+        <IntegratedDocumentViewer
+          isOpen={isDocumentViewerOpen}
+          onClose={handleCloseDocumentViewer}
+          filePath={selectedDocument.filePath}
+          fileName={selectedDocument.fileName}
+          fileType={selectedDocument.fileType}
+          content={selectedDocument.content}
+        />
       )}
       <SemanticSearchPanel
         isOpen={isSemanticSearchOpen}

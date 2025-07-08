@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { FileText, AlertCircle, Loader2, Sparkles, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { SummarizationModal } from '@/components/SummarizationModal'
+// import { SummarizationModal } from '@/components/SummarizationModal' // Removed
 import * as mammoth from 'mammoth'
 
 interface TextViewerProps {
@@ -18,7 +18,7 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
   const [loading, setLoading] = useState<boolean>(false)
   const [error, setError] = useState<string | null>(null)
   const [renderedContent, setRenderedContent] = useState<string>('')
-  const [isSummarizationOpen, setIsSummarizationOpen] = useState(false)
+  // const [isSummarizationOpen, setIsSummarizationOpen] = useState(false) // Removed
   const [copied, setCopied] = useState(false)
 
   // Load content when component mounts or content changes
@@ -71,15 +71,15 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
     setLoading(false)
     setError(null)
     setRenderedContent('')
-    setIsSummarizationOpen(false)
+    // setIsSummarizationOpen(false) // Removed
     setCopied(false)
     onClose()
   }, [onClose])
 
-  const handleSummarize = useCallback(() => {
-    console.log('🔄 TextViewer: Opening summarization modal')
-    setIsSummarizationOpen(true)
-  }, [])
+  // const handleSummarize = useCallback(() => {
+  //   console.log('🔄 TextViewer: Opening summarization modal')
+  //   setIsSummarizationOpen(true)
+  // }, [])
 
   const handleCopyContent = useCallback(async () => {
     try {
@@ -138,17 +138,7 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
                 )}
                 {copied ? 'Copied!' : 'Copy'}
               </Button>
-              
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleSummarize}
-                disabled={loading || !renderedContent}
-                className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600"
-              >
-                <Sparkles className="h-4 w-4 mr-1" />
-                Summarize
-              </Button>
+              {/* Summarize button removed */}
             </div>
           </div>
 
@@ -216,14 +206,7 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
           </div>
         </div>
       </DialogContent>
-      
-      {/* Summarization Modal */}
-      <SummarizationModal
-        isOpen={isSummarizationOpen}
-        onClose={() => setIsSummarizationOpen(false)}
-        filePath={filePath}
-        fileName={fileName}
-      />
+      {/* SummarizationModal removed */}
     </Dialog>
   )
 } 

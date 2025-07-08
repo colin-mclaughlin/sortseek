@@ -490,15 +490,52 @@ async def summarize_document(request: SummarizeRequest):
         
         logger.info(f"Successfully summarized {len(summaries)} sections")
         
-        # Save summaries to document and trigger reindexing
+        # Check for meaningless fallback responses before saving
+        meaningless_summaries = []
+        meaningful_summaries = []
+        
+        # TODO: This fallback phrase detection could be improved with a more robust strategy
+        # in the future, such as checking for multiple fallback patterns or using semantic
+        # similarity to detect when summaries are not meaningful.
+        
+        for summary in summaries:
+            # Check for fallback phrases and error messages (case-insensitive)
+            summary_lower = summary.summary.lower().strip()
+            if (summary_lower == "no meaningful summary available." or 
+                summary_lower == "no meaningful summary generated for this page." or
+                summary_lower.startswith("error processing") or
+                summary_lower == "no text content found on this page."):
+                meaningless_summaries.append(summary)
+                logger.warning(f"Detected meaningless fallback summary for section {summary.page}: '{summary.summary}'")
+            else:
+                meaningful_summaries.append(summary)
+        
+        # If all summaries are meaningless, skip saving entirely
+        if len(meaningful_summaries) == 0 and len(meaningless_summaries) > 0:
+            logger.warning(f"All {len(meaningless_summaries)} summaries for document are meaningless fallback responses. Skipping save to preserve existing content.")
+            return SummarizeResponse(
+                success=True,
+                message=f"Generated {len(summaries)} summaries, but all were meaningless fallback responses. No changes saved to preserve existing content.",
+                summaries=summaries,
+                totalPages=total_pages
+            )
+        
+        # If some summaries are meaningless, log but proceed with meaningful ones
+        if len(meaningless_summaries) > 0:
+            logger.warning(f"Skipping {len(meaningless_summaries)} meaningless summaries, saving {len(meaningful_summaries)} meaningful summaries")
+            summaries_to_save = meaningful_summaries
+        else:
+            summaries_to_save = summaries
+        
+        # Save meaningful summaries to document and trigger reindexing
         try:
             # Find the document in the database
             db = next(get_db())
             document = db.query(Document).filter(Document.file_path == request.filePath).first()
             
             if document:
-                # Combine all summaries into one content field
-                combined_summary = "\n\n".join([f"Section {s.page}: {s.summary}" for s in summaries])
+                # Combine meaningful summaries into one content field
+                combined_summary = "\n\n".join([f"Section {s.page}: {s.summary}" for s in summaries_to_save])
                 
                 print(f"📥 Calling index_document() for: {request.filePath}")
                 
@@ -510,7 +547,7 @@ async def summarize_document(request: SummarizeRequest):
                 )
                 
                 if success:
-                    logger.info(f"Successfully updated and reindexed document {document.id} with summaries")
+                    logger.info(f"Successfully updated and reindexed document {document.id} with {len(summaries_to_save)} meaningful summaries")
                 else:
                     logger.warning(f"Failed to update and reindex document {document.id} with summaries")
             else:

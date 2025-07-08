@@ -423,7 +423,7 @@ export function IntegratedDocumentViewer({
                       <Page
                         pageNumber={pageNumber}
                         width={Math.min(window.innerWidth * 0.6, 600)}
-                        renderTextLayer={false}
+                        renderTextLayer={true}
                         renderAnnotationLayer={false}
                         loading={
                           <div className="flex items-center justify-center h-64">

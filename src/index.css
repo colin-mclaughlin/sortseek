@@ -80,14 +80,14 @@
 }
 
 .react-pdf__Page__textContent {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  overflow: hidden;
-  opacity: 0.2;
-  line-height: 1.0;
+  color: transparent;
+  user-select: text;
+  z-index: 2;
+  pointer-events: auto;
+  mix-blend-mode: multiply;
+}
+.react-pdf__Page__textContent span {
+  color: black;
 }
 
 .react-pdf__Page__textContent--disabled {

@@ -240,7 +240,7 @@ export function PDFViewer({ isOpen, onClose, filePath, fileName }: PDFViewerProp
                     <Page
                       pageNumber={pageNumber}
                       width={Math.min(window.innerWidth * 0.8, 800)}
-                      renderTextLayer={false}
+                      renderTextLayer={true}
                       renderAnnotationLayer={false}
                       loading={
                         <div className="flex items-center justify-center h-64">

@@ -57,6 +57,11 @@ class SemanticSearchResponse(BaseModel):
     results: list
     count: int
 
+class SummarizeClauseRequest(BaseModel):
+    text: str
+class SummarizeClauseResponse(BaseModel):
+    summary: str
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -716,6 +721,15 @@ async def reset_embeddings():
     except Exception as e:
         logger.error(f"Failed to reset embeddings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/summarize-clause", response_model=SummarizeClauseResponse)
+async def summarize_clause(request: SummarizeClauseRequest):
+    try:
+        summary = await ai_service.summarize_text(request.text)
+        return SummarizeClauseResponse(summary=summary)
+    except Exception as e:
+        logger.error(f"Summarize clause failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to summarize clause")
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -258,3 +258,13 @@ export async function deleteDocument(documentId: number, deleteFile: boolean = f
     )
   }
 }
+
+export async function summarizeClause(text: string): Promise<{ summary: string }> {
+  const response = await fetch(`${API_BASE_URL}/summarize-clause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+  return await response.json();
+}

@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { summarizeDocument, SummarizeResponse, PageSummary } from '@/lib/api'
+import { summarizeClause } from '@/lib/api'
 
 
 // Set up PDF.js worker for Electron
@@ -59,6 +60,38 @@ export function IntegratedDocumentViewer({
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [summaries, setSummaries] = useState<PageSummary[]>([])
   const [totalPages, setTotalPages] = useState(0)
+
+  // Add state for clause summary and selection
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [clauseSummary, setClauseSummary] = useState<string | null>(null);
+  const [clauseLoading, setClauseLoading] = useState(false);
+
+  // Listen for selection changes
+  useEffect(() => {
+    function handleSelectionChange() {
+      const sel = window.getSelection();
+      const text = sel && sel.toString().trim();
+      setSelectedText(text && text.length > 0 ? text : '');
+    }
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, []);
+
+  // Summarize selection handler
+  const handleSummarizeSelection = async () => {
+    if (!selectedText) return;
+    setClauseLoading(true);
+    setClauseSummary(null);
+    try {
+      const res = await summarizeClause(selectedText);
+      setClauseSummary(res.summary);
+      setShowSummaryPanel(true);
+    } catch (e) {
+      setClauseSummary('Failed to summarize selection.');
+    } finally {
+      setClauseLoading(false);
+    }
+  };
 
   // Load document when component mounts or filePath changes
   useEffect(() => {
@@ -369,7 +402,23 @@ export function IntegratedDocumentViewer({
             </div>
 
             {/* Document Content */}
-            <div className="flex-1 overflow-auto p-6 min-h-0">
+            <div className="flex-1 overflow-auto p-6 min-h-0 relative">
+              {/* Summarize Selection Button */}
+              {selectedText && !clauseLoading && (
+                <button
+                  className="fixed right-8 top-32 z-50 bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700 transition"
+                  style={{ position: 'absolute', right: 32, top: 16 }}
+                  onClick={handleSummarizeSelection}
+                >
+                  Summarize Selection
+                </button>
+              )}
+              {clauseLoading && (
+                <div className="fixed right-8 top-32 z-50 bg-muted px-4 py-2 rounded shadow flex items-center gap-2" style={{ position: 'absolute', right: 32, top: 16 }}>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Summarizing...
+                </div>
+              )}
               {loading && (
                 <div className="flex items-center justify-center h-64">
                   <div className="flex items-center gap-2">
@@ -489,6 +538,21 @@ export function IntegratedDocumentViewer({
               </div>
               
               <div className="flex-1 overflow-auto p-4">
+                {/* Clause-level summary */}
+                {clauseSummary && (
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <span className="bg-blue-600 text-white px-2 py-1 rounded text-sm font-medium">
+                          Clause TLDR
+                        </span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm leading-relaxed">{clauseSummary}</p>
+                    </CardContent>
+                  </Card>
+                )}
                 {summaryLoading && (
                   <div className="flex flex-col items-center justify-center h-64">
                     <div className="flex items-center gap-2 mb-4">

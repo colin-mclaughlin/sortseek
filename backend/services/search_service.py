@@ -574,6 +574,8 @@ class SearchService:
                 score = 1.0 - dist
                 filename_boost = self._calculate_filename_boost(meta.get("filename"), query_filenames)
                 final_score = score * filename_boost
+                # Clamp the final score to [0, 1] range to prevent scores > 1.0
+                final_score = max(0.0, min(1.0, final_score))
                 print(f"📄 Match {i+1}: {meta.get('filename', 'Unknown')} (score: {final_score:.3f}, distance: {dist:.3f}, boost: {filename_boost:.2f})")
                 search_results.append({
                     "filename": meta.get("filename"),

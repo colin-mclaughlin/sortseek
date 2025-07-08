@@ -2,11 +2,15 @@ import React, { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Search, FileText, BookOpen, Sparkles, Send } from 'lucide-react'
+import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp } from 'lucide-react'
 import { semanticSearch, SemanticSearchResult } from '@/lib/api'
+
+// Configuration constants
+const MIN_CONFIDENCE = 0.80
 
 interface SemanticChatProps {
   className?: string
+  onViewDocument?: (filePath: string, fileName: string, fileType: string, content?: string) => void
 }
 
 interface ChatMessage {
@@ -16,11 +20,12 @@ interface ChatMessage {
   timestamp: Date
 }
 
-export function SemanticChat({ className }: SemanticChatProps) {
+export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
+  const [collapsedResults, setCollapsedResults] = useState<Set<string>>(new Set())
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -56,6 +61,152 @@ export function SemanticChat({ className }: SemanticChatProps) {
     }
   }
 
+  const handleViewDocument = (result: SemanticSearchResult) => {
+    if (onViewDocument) {
+      // Determine file type from filename
+      const fileType = result.filename.toLowerCase().endsWith('.pdf') ? '.pdf' :
+                      result.filename.toLowerCase().endsWith('.txt') ? '.txt' :
+                      result.filename.toLowerCase().endsWith('.docx') ? '.docx' : '.txt'
+      
+      onViewDocument(result.file_path, result.filename, fileType)
+    }
+  }
+
+  const toggleResultsCollapse = (messageId: string) => {
+    setCollapsedResults(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(messageId)) {
+        newSet.delete(messageId)
+      } else {
+        newSet.add(messageId)
+      }
+      return newSet
+    })
+  }
+
+  const renderSearchResults = (message: ChatMessage) => {
+    // Filter and sort results by confidence threshold
+    const filteredResults = message.results
+      .filter(result => result.score >= MIN_CONFIDENCE)
+      .sort((a, b) => b.score - a.score)
+
+    const bestMatch = filteredResults.length > 0 ? filteredResults[0] : null
+    const otherResults = filteredResults.slice(1)
+    const isCollapsed = collapsedResults.has(message.id)
+
+    if (filteredResults.length === 0) {
+      return (
+        <div className="bg-muted rounded-lg px-4 py-3">
+          <p className="text-muted-foreground text-sm mb-1">🤔 No strong matches found.</p>
+          <p className="text-xs text-muted-foreground">Try rephrasing your question or highlighting specific text.</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-3">
+        {/* Best Match */}
+        {bestMatch && (
+          <Card className="shadow-md border-2 border-yellow-200 bg-gradient-to-r from-yellow-50 to-orange-50">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                  🏆 Best Match
+                </div>
+                <FileText className="h-4 w-4 text-primary" />
+                <span className="font-semibold text-sm">{bestMatch.filename}</span>
+                {typeof bestMatch.page === 'number' && (
+                  <span className="ml-2 flex items-center text-xs text-muted-foreground">
+                    <BookOpen className="h-3 w-3 mr-1" />
+                    Page {bestMatch.page}
+                  </span>
+                )}
+                <span className="ml-auto text-xs text-muted-foreground">Score: {bestMatch.score.toFixed(2)}</span>
+              </div>
+              <div className="text-sm text-foreground/90 leading-relaxed mb-3">
+                {bestMatch.content.length > 400
+                  ? bestMatch.content.slice(0, 400) + '...'
+                  : bestMatch.content}
+              </div>
+              <Button 
+                onClick={() => handleViewDocument(bestMatch)}
+                className="w-full"
+                size="sm"
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                View Document
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Other Results */}
+        {otherResults.length > 0 && (
+          <div className="space-y-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => toggleResultsCollapse(message.id)}
+              className="w-full justify-between p-2 h-auto text-left"
+            >
+              <span className="text-sm font-medium">Other Related Results ({otherResults.length})</span>
+              {isCollapsed ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronUp className="h-4 w-4" />
+              )}
+            </Button>
+            
+            {!isCollapsed && (
+              <div className="space-y-2">
+                {otherResults.map((result, idx) => (
+                  <Card key={idx} className="shadow-sm border-l-4 border-l-primary">
+                    <CardContent className="py-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText className="h-4 w-4 text-primary" />
+                        <span className="font-medium text-sm">{result.filename}</span>
+                        {typeof result.page === 'number' && (
+                          <span className="ml-2 flex items-center text-xs text-muted-foreground">
+                            <BookOpen className="h-3 w-3 mr-1" />
+                            Page {result.page}
+                          </span>
+                        )}
+                        <span className="ml-auto text-xs text-muted-foreground">
+                          Score: {result.score.toFixed(2)}
+                        </span>
+                      </div>
+                      <div className="text-sm text-foreground/90 leading-relaxed mb-2">
+                        {result.content.length > 300
+                          ? result.content.slice(0, 300) + '...'
+                          : result.content}
+                      </div>
+                      <Button 
+                        onClick={() => handleViewDocument(result)}
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                      >
+                        <Eye className="h-4 w-4 mr-2" />
+                        View Document
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Debug Info */}
+        {message.results.length > 0 && (
+          <div className="text-xs text-muted-foreground pt-2 border-t">
+            <span>Showing {filteredResults.length} of {message.results.length} results (threshold: {MIN_CONFIDENCE})</span>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className={`flex flex-col h-full ${className}`}>
       {/* Chat History */}
@@ -79,38 +230,7 @@ export function SemanticChat({ className }: SemanticChatProps) {
               </div>
               
               {/* Search Results */}
-              <div className="space-y-3">
-                {message.results.length === 0 ? (
-                  <div className="bg-muted rounded-lg px-4 py-3">
-                    <p className="text-muted-foreground text-sm">No results found for your query.</p>
-                  </div>
-                ) : (
-                  message.results.map((result, idx) => (
-                    <Card key={idx} className="shadow-sm border-l-4 border-l-primary">
-                      <CardContent className="py-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <FileText className="h-4 w-4 text-primary" />
-                          <span className="font-semibold text-sm">{result.filename}</span>
-                          {typeof result.page === 'number' && (
-                            <span className="ml-2 flex items-center text-xs text-muted-foreground">
-                              <BookOpen className="h-3 w-3 mr-1" />
-                              Page {result.page}
-                            </span>
-                          )}
-                          <span className="ml-auto text-xs text-muted-foreground">
-                            Score: {result.score.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="text-sm text-foreground/90 leading-relaxed">
-                          {result.content.length > 300
-                            ? result.content.slice(0, 300) + '...'
-                            : result.content}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
+              {renderSearchResults(message)}
             </div>
           ))
         )}

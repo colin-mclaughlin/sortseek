@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { FolderOpen, FileText, Settings, RefreshCw, Loader2, Eye, RotateCcw, Trash2 } from 'lucide-react'
+import { FolderOpen, FileText, Settings, RefreshCw, Loader2, Eye, RotateCcw, Trash2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -108,6 +108,19 @@ function App(): React.JSX.Element {
       fileName: doc.filename, 
       fileType: normalizedFileType,
       content: doc.content
+    })
+    setIsDocumentViewerOpen(true)
+  }
+
+  const handleViewDocumentFromSearch = (filePath: string, fileName: string, fileType: string, content?: string) => {
+    // Find the document in our documents list to get the full content
+    const doc = documents.find(d => d.file_path === filePath)
+    
+    setSelectedDocument({ 
+      filePath, 
+      fileName, 
+      fileType,
+      content: content || doc?.content
     })
     setIsDocumentViewerOpen(true)
   }
@@ -242,6 +255,14 @@ function App(): React.JSX.Element {
             <Button 
               variant="ghost" 
               size="icon" 
+              onClick={() => setIsSemanticSearchOpen(true)}
+              title="Semantic Search"
+            >
+              <Sparkles className="h-4 w-4" />
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="icon" 
               onClick={handleTestDocumentViewer}
               title="Test Document Viewer"
             >
@@ -303,7 +324,7 @@ function App(): React.JSX.Element {
               </TabsList>
               
               <TabsContent value="chat" className="mt-6 h-[calc(100vh-200px)]">
-                <SemanticChat />
+                <SemanticChat onViewDocument={handleViewDocumentFromSearch} />
               </TabsContent>
               
               <TabsContent value="documents" className="mt-6">
@@ -404,6 +425,7 @@ function App(): React.JSX.Element {
       <SemanticSearchPanel
         isOpen={isSemanticSearchOpen}
         onClose={() => setIsSemanticSearchOpen(false)}
+        onViewDocument={handleViewDocumentFromSearch}
       />
       
       {/* Delete Confirmation Dialog */}

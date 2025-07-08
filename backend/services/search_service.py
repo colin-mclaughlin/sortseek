@@ -7,12 +7,14 @@ from chromadb.config import Settings
 import numpy as np
 import os
 import re
+import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
 from database import get_db
 from models import Document, SearchResult
 from langchain.embeddings import OpenAIEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +157,63 @@ class SearchService:
         
         return self._embedding_function, self._embedding_dimension
     
+    def _create_chunks(self, text: str, document: Document) -> tuple[List[str], List[Dict[str, Any]]]:
+        """
+        Create chunks from text using LangChain's RecursiveCharacterTextSplitter
+        Returns tuple of (chunks, metadatas)
+        """
+        try:
+            # Initialize the text splitter with specified parameters
+            text_splitter = RecursiveCharacterTextSplitter(
+                separators=["\n\n", "\n", ".", " "],
+                chunk_size=750,
+                chunk_overlap=150,
+                length_function=len,
+                is_separator_regex=False
+            )
+            
+            # Split the text into chunks
+            chunks = text_splitter.split_text(text)
+            
+            # Filter out empty or too-short chunks
+            valid_chunks = []
+            metadatas = []
+            
+            for i, chunk in enumerate(chunks):
+                if chunk and len(chunk.strip()) >= 50:  # Minimum 50 characters
+                    valid_chunks.append(chunk.strip())
+                    
+                    # Create metadata for this chunk
+                    metadata = {
+                        "document_id": document.id,
+                        "filename": document.filename,
+                        "filetype": document.file_type,
+                        "source_path": document.file_path,
+                        "import_time": datetime.datetime.now().isoformat(),
+                        "chunk_index": i,
+                        "chunk_size": len(chunk.strip())
+                    }
+                    metadatas.append(metadata)
+                else:
+                    logger.debug(f"Skipping chunk {i} for {document.filename} - too short or empty")
+            
+            logger.info(f"Created {len(valid_chunks)} valid chunks from {document.filename} ({len(text)} chars)")
+            return valid_chunks, metadatas
+            
+        except Exception as e:
+            logger.error(f"Error creating chunks for {document.filename}: {e}")
+            # Fallback: return the original text as a single chunk
+            fallback_metadata = {
+                "document_id": document.id,
+                "filename": document.filename,
+                "filetype": document.file_type,
+                "source_path": document.file_path,
+                "import_time": datetime.datetime.now().isoformat(),
+                "chunk_index": 0,
+                "chunk_size": len(text)
+            }
+            return [text], [fallback_metadata]
+    
     async def initialize(self):
         """Initialize ChromaDB client and collection"""
         try:
@@ -285,32 +344,26 @@ class SearchService:
             if self._collection is None:
                 logger.error("ChromaDB collection is not initialized. Cannot index document.")
                 return
-                
-            # Create embedding for the document
-            embedding = self._get_embedding(content_to_index)
             
-            # Add to ChromaDB collection
-            self._collection.add(
-                embeddings=[embedding],
-                documents=[content_to_index],
-                metadatas=[{
-                    "document_id": document.id,
-                    "filename": document.filename,
-                    "file_path": document.file_path,
-                    "file_type": document.file_type
-                }],
-                ids=[f"doc_{document.id}"]
-            )
+            # Create chunks using RecursiveCharacterTextSplitter
+            chunks, chunk_metadatas = self._create_chunks(content_to_index, document)
+            
+            if not chunks:
+                logger.warning(f"No valid chunks created for document {document.id} ({document.filename}) - skipping indexing")
+                return
+            
+            # Index chunks using the existing index_document_chunks method
+            await self.index_document_chunks(document, chunks, chunk_metadatas)
             
             # Mark as indexed in database
             db = next(get_db())
             doc = db.query(Document).filter(Document.id == document.id).first()
             if doc:
                 doc.is_indexed = True
-                doc.embedding_path = f"doc_{document.id}"
+                doc.embedding_path = f"doc_{document.id}_chunked"
                 db.commit()
             
-            logger.info(f"Successfully indexed document {document.id}: {document.filename} ({len(content_to_index)} chars)")
+            logger.info(f"Successfully indexed document {document.id}: {document.filename} ({len(chunks)} chunks)")
             
         except Exception as e:
             logger.error(f"Error indexing document {document.id}: {e}")
@@ -410,7 +463,7 @@ class SearchService:
             print(f"📊 Adding {len(valid_chunks)} chunks to Chroma for {document.filename}")
                 
             embeddings = [self._get_embedding(chunk) for chunk in valid_chunks]
-            ids = [f"doc_{document.id}_chunk_{i}" for i in range(len(valid_chunks))]
+            ids = [f"doc_{document.id}_chunk_{metadata.get('chunk_index', i)}" for i, metadata in enumerate(valid_metadatas)]
             
             # Wrap the add call in try/except with individual chunk logging
             for i, (chunk, embedding, metadata, chunk_id) in enumerate(zip(valid_chunks, embeddings, valid_metadatas, ids)):
@@ -579,7 +632,7 @@ class SearchService:
                 print(f"📄 Match {i+1}: {meta.get('filename', 'Unknown')} (score: {final_score:.3f}, distance: {dist:.3f}, boost: {filename_boost:.2f})")
                 search_results.append({
                     "filename": meta.get("filename"),
-                    "file_path": meta.get("file_path"),
+                    "file_path": meta.get("source_path"),  # Use source_path from new metadata
                     "page": meta.get("page"),
                     "content": doc,
                     "score": final_score,

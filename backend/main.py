@@ -336,7 +336,7 @@ async def suggest_folder(content: str, current_path: Optional[str] = None):
 
 @app.post("/summarize-document")
 async def summarize_document(request: SummarizeRequest):
-    """Summarize a PDF document by pages using AI"""
+    """Summarize a document by pages using AI (supports PDF, DOCX, TXT)"""
     try:
         logger.info(f"Received summarization request for: {request.filePath}")
         
@@ -346,67 +346,149 @@ async def summarize_document(request: SummarizeRequest):
         if not os.path.exists(request.filePath):
             raise HTTPException(status_code=404, detail="File not found")
         
-        # Import fitz here to avoid issues if PyMuPDF is not installed
-        try:
-            import fitz
-        except ImportError:
-            raise HTTPException(status_code=500, detail="PyMuPDF not available")
+        # Determine file type from extension
+        file_extension = os.path.splitext(request.filePath)[1].lower()
+        logger.info(f"File type detected: {file_extension}")
         
-        # Open the PDF document
-        doc = fitz.open(request.filePath)
-        total_pages = len(doc)
-        logger.info(f"PDF has {total_pages} pages")
-        
-        # Limit to maxPages for performance
-        pages_to_summarize = min(request.maxPages, total_pages)
         summaries = []
+        total_pages = 0
         
-        for page_num in range(pages_to_summarize):
+        if file_extension == '.pdf':
+            # Handle PDF files using PyMuPDF
             try:
-                logger.info(f"Processing page {page_num + 1}")
-                
-                # Get the page
-                page = doc.load_page(page_num)
-                
-                # Extract text from the page
-                text = page.get_text()
-                
-                if not text.strip():
-                    logger.warning(f"Page {page_num + 1} has no text content")
+                import fitz
+            except ImportError:
+                raise HTTPException(status_code=500, detail="PyMuPDF not available for PDF processing")
+            
+            # Open the PDF document
+            doc = fitz.open(request.filePath)
+            total_pages = len(doc)
+            logger.info(f"PDF has {total_pages} pages")
+            
+            # Limit to maxPages for performance
+            pages_to_summarize = min(request.maxPages, total_pages)
+            
+            for page_num in range(pages_to_summarize):
+                try:
+                    logger.info(f"Processing PDF page {page_num + 1}")
+                    
+                    # Get the page
+                    page = doc.load_page(page_num)
+                    
+                    # Extract text from the page
+                    text = page.get_text()
+                    
+                    if not text.strip():
+                        logger.warning(f"Page {page_num + 1} has no text content")
+                        summaries.append(PageSummary(
+                            page=page_num + 1,
+                            summary="No text content found on this page."
+                        ))
+                        continue
+                    
+                    # Truncate text if too long for API
+                    if len(text) > 3000:
+                        text = text[:3000] + "..."
+                    
+                    logger.info(f"Page {page_num + 1} text length: {len(text)} characters")
+                    
+                    # Generate summary using AI
+                    summary = await ai_service.summarize_text(text, max_length=300)
+                    
                     summaries.append(PageSummary(
                         page=page_num + 1,
-                        summary="No text content found on this page."
+                        summary=summary
                     ))
-                    continue
+                    
+                    logger.info(f"Generated summary for page {page_num + 1}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing PDF page {page_num + 1}: {e}")
+                    summaries.append(PageSummary(
+                        page=page_num + 1,
+                        summary=f"Error processing this page: {str(e)}"
+                    ))
+            
+            doc.close()
+            
+        elif file_extension in ['.docx', '.txt']:
+            # Handle DOCX and TXT files
+            try:
+                from services.file_service import FileService
+                file_service = FileService()
                 
-                # Truncate text if too long for API
-                if len(text) > 3000:
-                    text = text[:3000] + "..."
+                # Extract content using the same method as during import
+                content = await file_service._extract_content(Path(request.filePath))
                 
-                logger.info(f"Page {page_num + 1} text length: {len(text)} characters")
+                if not content or not content.strip():
+                    raise HTTPException(status_code=400, detail="No content found in document")
                 
-                # Generate summary using AI
-                summary = await ai_service.summarize_text(text, max_length=300)
+                logger.info(f"Extracted content length: {len(content)} characters")
                 
-                print(f"🧠 Summarization complete for {request.filePath}, summary length: {len(summary)}")
+                # For text files, treat the entire content as one "page"
+                total_pages = 1
                 
-                summaries.append(PageSummary(
-                    page=page_num + 1,
-                    summary=summary
-                ))
+                # Split content into chunks if it's too long
+                max_chunk_size = 3000
+                content_chunks = []
                 
-                logger.info(f"Generated summary for page {page_num + 1}")
+                if len(content) > max_chunk_size:
+                    # Split by paragraphs or sentences
+                    paragraphs = content.split('\n\n')
+                    current_chunk = ""
+                    
+                    for paragraph in paragraphs:
+                        if len(current_chunk) + len(paragraph) > max_chunk_size:
+                            if current_chunk:
+                                content_chunks.append(current_chunk.strip())
+                                current_chunk = paragraph
+                            else:
+                                # Single paragraph is too long, truncate it
+                                content_chunks.append(paragraph[:max_chunk_size] + "...")
+                        else:
+                            current_chunk += "\n\n" + paragraph if current_chunk else paragraph
+                    
+                    if current_chunk.strip():
+                        content_chunks.append(current_chunk.strip())
+                else:
+                    content_chunks = [content]
+                
+                logger.info(f"Split content into {len(content_chunks)} chunks")
+                
+                # Generate summaries for each chunk
+                for i, chunk in enumerate(content_chunks):
+                    try:
+                        logger.info(f"Processing {file_extension} chunk {i + 1}")
+                        
+                        # Truncate if still too long
+                        if len(chunk) > max_chunk_size:
+                            chunk = chunk[:max_chunk_size] + "..."
+                        
+                        # Generate summary using AI
+                        summary = await ai_service.summarize_text(chunk, max_length=300)
+                        
+                        summaries.append(PageSummary(
+                            page=i + 1,
+                            summary=summary
+                        ))
+                        
+                        logger.info(f"Generated summary for chunk {i + 1}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {file_extension} chunk {i + 1}: {e}")
+                        summaries.append(PageSummary(
+                            page=i + 1,
+                            summary=f"Error processing this section: {str(e)}"
+                        ))
                 
             except Exception as e:
-                logger.error(f"Error processing page {page_num + 1}: {e}")
-                summaries.append(PageSummary(
-                    page=page_num + 1,
-                    summary=f"Error processing this page: {str(e)}"
-                ))
+                logger.error(f"Error extracting content from {file_extension} file: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to process {file_extension} file: {str(e)}")
         
-        doc.close()
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
         
-        logger.info(f"Successfully summarized {len(summaries)} pages")
+        logger.info(f"Successfully summarized {len(summaries)} sections")
         
         # Save summaries to document and trigger reindexing
         try:
@@ -416,7 +498,7 @@ async def summarize_document(request: SummarizeRequest):
             
             if document:
                 # Combine all summaries into one content field
-                combined_summary = "\n\n".join([f"Page {s.page}: {s.summary}" for s in summaries])
+                combined_summary = "\n\n".join([f"Section {s.page}: {s.summary}" for s in summaries])
                 
                 print(f"📥 Calling index_document() for: {request.filePath}")
                 
@@ -439,7 +521,7 @@ async def summarize_document(request: SummarizeRequest):
         
         return SummarizeResponse(
             success=True,
-            message=f"Successfully summarized {len(summaries)} pages",
+            message=f"Successfully summarized {len(summaries)} sections",
             summaries=summaries,
             totalPages=total_pages
         )

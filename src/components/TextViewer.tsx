@@ -34,6 +34,8 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
     setError(null)
     setRenderedContent('')
     
+    console.log('🔍 TextViewer processing:', { fileType, fileName, hasContent: !!content })
+    
     try {
       if (fileType === '.txt') {
         // For TXT files, use the content directly
@@ -53,7 +55,8 @@ export function TextViewer({ isOpen, onClose, filePath, fileName, fileType, cont
          setRenderedContent(content)
          console.log('✅ TextViewer: DOCX content processed (extracted text)')
        } else {
-        throw new Error(`Unsupported file type: ${fileType}`)
+        console.warn(`TextViewer received unsupported file type: ${fileType}`)
+        throw new Error(`Preview not supported for ${fileType.toUpperCase()} files. Please use the PDF viewer for PDF files.`)
       }
     } catch (error) {
       console.error('❌ TextViewer: Error processing content:', error)

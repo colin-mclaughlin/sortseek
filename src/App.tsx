@@ -92,10 +92,15 @@ function App(): React.JSX.Element {
   }
 
   const handleViewDocument = (doc: Document) => {
+    // Normalize file type to lowercase with dot prefix for consistent comparison
+    const normalizedFileType = doc.file_type.toLowerCase().startsWith('.') 
+      ? doc.file_type.toLowerCase() 
+      : `.${doc.file_type.toLowerCase()}`
+    
     setSelectedDocument({ 
       filePath: doc.file_path, 
       fileName: doc.filename, 
-      fileType: doc.file_type,
+      fileType: normalizedFileType,
       content: doc.content
     })
     setIsDocumentViewerOpen(true)
@@ -296,23 +301,31 @@ function App(): React.JSX.Element {
 
       {/* Document Viewer Modal */}
       {selectedDocument && (
-        selectedDocument.fileType === '.pdf' ? (
-          <PDFViewer
-            isOpen={isDocumentViewerOpen}
-            onClose={handleCloseDocumentViewer}
-            filePath={selectedDocument.filePath}
-            fileName={selectedDocument.fileName}
-          />
-        ) : (
-          <TextViewer
-            isOpen={isDocumentViewerOpen}
-            onClose={handleCloseDocumentViewer}
-            filePath={selectedDocument.filePath}
-            fileName={selectedDocument.fileName}
-            fileType={selectedDocument.fileType}
-            content={selectedDocument.content}
-          />
-        )
+        (() => {
+          console.log('🔍 Document viewer routing:', {
+            fileType: selectedDocument.fileType,
+            fileName: selectedDocument.fileName,
+            isPDF: selectedDocument.fileType === '.pdf'
+          })
+          
+          return selectedDocument.fileType === '.pdf' ? (
+            <PDFViewer
+              isOpen={isDocumentViewerOpen}
+              onClose={handleCloseDocumentViewer}
+              filePath={selectedDocument.filePath}
+              fileName={selectedDocument.fileName}
+            />
+          ) : (
+            <TextViewer
+              isOpen={isDocumentViewerOpen}
+              onClose={handleCloseDocumentViewer}
+              filePath={selectedDocument.filePath}
+              fileName={selectedDocument.fileName}
+              fileType={selectedDocument.fileType}
+              content={selectedDocument.content}
+            />
+          )
+        })()
       )}
       <SemanticSearchPanel
         isOpen={isSemanticSearchOpen}

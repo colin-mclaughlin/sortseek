@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from 'react'
-import { Search, FolderOpen, FileText, Settings, RefreshCw, Loader2, Eye } from 'lucide-react'
+import { FolderOpen, FileText, Settings, RefreshCw, Loader2, Eye, RotateCcw, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Separator } from '@/components/ui/separator'
-import { getBackendStatus, importFolder, getDocuments } from '@/lib/api'
+import { getBackendStatus, importFolder, getDocuments, refreshDocument, deleteDocument } from '@/lib/api'
 import { Document } from '@/lib/types'
 import { IntegratedDocumentViewer } from '@/components/IntegratedDocumentViewer'
 import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
 import { SemanticChat } from '@/components/SemanticChat'
+import { DeleteConfirmDialog } from '@/components/DeleteConfirmDialog'
 
 function App(): React.JSX.Element {
-  const [searchQuery, setSearchQuery] = useState('')
   const [isBackendConnected, setIsBackendConnected] = useState(false)
   const [isCheckingBackend, setIsCheckingBackend] = useState(false)
   const [backendError, setBackendError] = useState<string | null>(null)
@@ -22,6 +21,14 @@ function App(): React.JSX.Element {
   const [selectedDocument, setSelectedDocument] = useState<{ filePath: string; fileName: string; fileType: string; content?: string } | null>(null)
   const [isDocumentViewerOpen, setIsDocumentViewerOpen] = useState(false)
   const [isSemanticSearchOpen, setIsSemanticSearchOpen] = useState(false)
+  
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  
+  // Refresh state
+  const [refreshingDocuments, setRefreshingDocuments] = useState<Set<number>>(new Set())
 
   const checkBackendStatus = async () => {
     setIsCheckingBackend(true)
@@ -108,6 +115,72 @@ function App(): React.JSX.Element {
   const handleCloseDocumentViewer = () => {
     setIsDocumentViewerOpen(false)
     setSelectedDocument(null)
+  }
+
+  const handleRefreshDocument = async (doc: Document) => {
+    try {
+      setRefreshingDocuments(prev => new Set(prev).add(doc.id))
+      
+      const result = await refreshDocument(doc.id)
+      
+      if (result.success) {
+        // Update the document in the local state
+        setDocuments(prev => prev.map(d => 
+          d.id === doc.id ? { ...d, content: result.document.content, file_size: result.document.file_size } : d
+        ))
+        
+        // If this document is currently open, update its content
+        if (selectedDocument && selectedDocument.filePath === doc.file_path) {
+          setSelectedDocument(prev => prev ? { ...prev, content: result.document.content } : null)
+        }
+        
+        console.log('Document refreshed successfully:', result.message)
+      }
+    } catch (error) {
+      console.error('Failed to refresh document:', error)
+      // You could add a toast notification here
+    } finally {
+      setRefreshingDocuments(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(doc.id)
+        return newSet
+      })
+    }
+  }
+
+  const handleDeleteDocument = (doc: Document) => {
+    setDocumentToDelete(doc)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleConfirmDelete = async (deleteFile: boolean) => {
+    if (!documentToDelete) return
+    
+    try {
+      setIsDeleting(true)
+      
+      const result = await deleteDocument(documentToDelete.id, deleteFile)
+      
+      if (result.success) {
+        // Remove from local state
+        setDocuments(prev => prev.filter(d => d.id !== documentToDelete.id))
+        
+        // If this document is currently open, close the viewer
+        if (selectedDocument && selectedDocument.filePath === documentToDelete.file_path) {
+          setIsDocumentViewerOpen(false)
+          setSelectedDocument(null)
+        }
+        
+        console.log('Document deleted successfully:', result.message)
+      }
+    } catch (error) {
+      console.error('Failed to delete document:', error)
+      // You could add a toast notification here
+    } finally {
+      setIsDeleting(false)
+      setDeleteDialogOpen(false)
+      setDocumentToDelete(null)
+    }
   }
 
   // Debug function to test document viewer
@@ -278,12 +351,31 @@ function App(): React.JSX.Element {
                               <Button
                                 variant="outline"
                                 size="sm"
+                                onClick={() => handleRefreshDocument(doc)}
+                                disabled={refreshingDocuments.has(doc.id)}
+                                title="Refresh document from disk"
+                              >
+                                <RotateCcw className={`h-4 w-4 mr-1 ${refreshingDocuments.has(doc.id) ? 'animate-spin' : ''}`} />
+                                {refreshingDocuments.has(doc.id) ? 'Refreshing...' : 'Refresh'}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
                                 onClick={() => handleViewDocument(doc)}
-                                className="ml-2"
                                 title="View document"
                               >
                                 <Eye className="h-4 w-4 mr-1" />
                                 View
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleDeleteDocument(doc)}
+                                title="Delete document"
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
                               </Button>
                             </div>
                           </div>
@@ -312,6 +404,15 @@ function App(): React.JSX.Element {
       <SemanticSearchPanel
         isOpen={isSemanticSearchOpen}
         onClose={() => setIsSemanticSearchOpen(false)}
+      />
+      
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmDialog
+        isOpen={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleConfirmDelete}
+        fileName={documentToDelete?.filename || ''}
+        isLoading={isDeleting}
       />
     </div>
   )

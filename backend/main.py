@@ -273,6 +273,112 @@ async def get_document(document_id: int):
         logger.error(f"Failed to get document {document_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/documents/{document_id}/refresh")
+async def refresh_document(document_id: int):
+    """Refresh document content by re-reading from disk"""
+    try:
+        logger.info(f"Refreshing document {document_id}")
+        
+        db = next(get_db())
+        document = db.query(Document).filter(Document.id == document_id).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Check if file still exists on disk
+        if not os.path.exists(document.file_path):
+            raise HTTPException(status_code=404, detail="File not found on disk")
+        
+        # Re-extract content using file service
+        from services.file_service import FileService
+        file_service = FileService()
+        
+        new_content = await file_service._extract_content(Path(document.file_path))
+        
+        if not new_content or not new_content.strip():
+            raise HTTPException(status_code=400, detail="No content found in file")
+        
+        # Update file size
+        file_size = os.path.getsize(document.file_path)
+        
+        # Update document in database
+        document.content = new_content
+        document.file_size = file_size
+        document.summary = None  # Clear existing summary since content changed
+        document.is_indexed = False  # Mark for reindexing
+        document.embedding_path = None
+        
+        db.commit()
+        
+        # Reindex the document
+        if search_service:
+            await search_service.index_document(document)
+        
+        logger.info(f"Successfully refreshed document {document_id}: {document.filename}")
+        
+        return {
+            "success": True,
+            "message": f"Document refreshed successfully",
+            "document": document.to_dict()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to refresh document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/documents/{document_id}")
+async def delete_document(document_id: int, delete_file: bool = False):
+    """Delete a document from the database and optionally from disk"""
+    try:
+        logger.info(f"Deleting document {document_id} (delete_file={delete_file})")
+        
+        db = next(get_db())
+        document = db.query(Document).filter(Document.id == document_id).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Store file path before deletion
+        file_path = document.file_path
+        filename = document.filename
+        
+        # Remove from search index if indexed
+        if document.embedding_path and search_service:
+            try:
+                search_service.collection.delete(ids=[document.embedding_path])
+                logger.info(f"Removed document {document_id} from search index")
+            except Exception as e:
+                logger.warning(f"Failed to remove document {document_id} from search index: {e}")
+        
+        # Delete from database
+        db.delete(document)
+        db.commit()
+        
+        # Optionally delete file from disk
+        if delete_file and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Deleted file from disk: {file_path}")
+            except Exception as e:
+                logger.error(f"Failed to delete file from disk {file_path}: {e}")
+                # Don't fail the whole operation if file deletion fails
+        
+        logger.info(f"Successfully deleted document {document_id}: {filename}")
+        
+        return {
+            "success": True,
+            "message": f"Document deleted successfully",
+            "deleted_file": delete_file and os.path.exists(file_path) == False
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/search")
 async def search_documents(
     query: str,
@@ -539,17 +645,17 @@ async def summarize_document(request: SummarizeRequest):
                 
                 print(f"📥 Calling index_document() for: {request.filePath}")
                 
-                # Update document content with summaries and reindex
+                # Update document summary field with summaries and reindex
                 success = await search_service.update_document_content(
                     document.id, 
                     combined_summary, 
-                    "content"  # Update the main content field
+                    "summary"  # Update the summary field, not content
                 )
                 
                 if success:
-                    logger.info(f"Successfully updated and reindexed document {document.id} with {len(summaries_to_save)} meaningful summaries")
+                    logger.info(f"Successfully updated summary and reindexed document {document.id} with {len(summaries_to_save)} meaningful summaries")
                 else:
-                    logger.warning(f"Failed to update and reindex document {document.id} with summaries")
+                    logger.warning(f"Failed to update summary and reindex document {document.id}")
             else:
                 logger.warning(f"Document not found in database for path: {request.filePath}")
                 

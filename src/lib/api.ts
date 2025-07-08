@@ -201,4 +201,60 @@ export async function semanticSearch(query: string): Promise<SemanticSearchResul
         : 'Failed to perform semantic search'
     )
   }
-} 
+}
+
+/**
+ * Refresh a document by re-reading from disk
+ */
+export async function refreshDocument(documentId: number): Promise<{ success: boolean; message: string; document: any }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/${documentId}/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Failed to refresh document:', error)
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : 'Failed to refresh document'
+    )
+  }
+}
+
+/**
+ * Delete a document from the database and optionally from disk
+ */
+export async function deleteDocument(documentId: number, deleteFile: boolean = false): Promise<{ success: boolean; message: string; deleted_file: boolean }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/${documentId}?delete_file=${deleteFile}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const data = await response.json()
+    return data
+  } catch (error) {
+    console.error('Failed to delete document:', error)
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : 'Failed to delete document'
+    )
+  }
+}

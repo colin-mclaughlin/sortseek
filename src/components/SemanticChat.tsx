@@ -2,9 +2,9 @@ import React, { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp, Filter, Pencil, Check, X } from 'lucide-react'
+import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp, Filter, Pencil, Check, X, Folder } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { semanticSearch, SemanticSearchResult, SemanticSearchFilters, API_BASE_URL } from '@/lib/api'
+import { semanticSearch, SemanticSearchResult, SemanticSearchFilters, API_BASE_URL, smartMove, applyMove } from '@/lib/api'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Configuration constants
@@ -47,6 +47,15 @@ export function SemanticChat({ className, onViewDocument, onRenameSuccess }: Sem
   const [renameInput, setRenameInput] = useState('');
   const [renameSuccess, setRenameSuccess] = useState(false);
   const [renameTargetPath, setRenameTargetPath] = useState<string | null>(null);
+
+  // Add state for smart move UI
+  const [moveLoading, setMoveLoading] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [suggestedFolder, setSuggestedFolder] = useState<string | null>(null);
+  const [showMoveInput, setShowMoveInput] = useState(false);
+  const [moveInput, setMoveInput] = useState('');
+  const [moveSuccess, setMoveSuccess] = useState(false);
+  const [moveTargetPath, setMoveTargetPath] = useState<string | null>(null);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -190,6 +199,74 @@ export function SemanticChat({ className, onViewDocument, onRenameSuccess }: Sem
     }
   };
 
+  const handleSuggestMove = async (sourcePath: string) => {
+    setMoveLoading(true);
+    setMoveError(null);
+    setMoveSuccess(false);
+    setSuggestedFolder(null);
+    setShowMoveInput(false);
+    setMoveInput('');
+    setMoveTargetPath(sourcePath);
+    try {
+      const data = await smartMove(sourcePath);
+      if (data.suggested_folder) {
+        setSuggestedFolder(data.suggested_folder);
+        setMoveInput(data.suggested_folder);
+        setShowMoveInput(true);
+      } else {
+        setMoveError('Failed to get suggestion');
+      }
+    } catch (e) {
+      setMoveError('Network error');
+    } finally {
+      setMoveLoading(false);
+    }
+  };
+
+  const handleApplyMove = async (sourcePath: string, currentFilename: string) => {
+    if (!sourcePath || !moveInput) return;
+    setMoveLoading(true);
+    setMoveError(null);
+    setMoveSuccess(false);
+    try {
+      const data = await applyMove(sourcePath, moveInput);
+      if (data.success) {
+        setMoveSuccess(true);
+        setShowMoveInput(false);
+        setMoveTargetPath(null);
+        // Update all chatHistory results in place
+        setChatHistory(prevHistory => prevHistory.map(msg => ({
+          ...msg,
+          results: msg.results.map(result => {
+            // Update if filename or source_path matches old values
+            if (
+              result.filename === currentFilename ||
+              result.metadata?.source_path === data.old_path
+            ) {
+              return {
+                ...result,
+                file_path: data.new_path,
+                metadata: {
+                  ...result.metadata,
+                  source_path: data.new_path
+                }
+              };
+            }
+            return result;
+          })
+        })));
+        if (onRenameSuccess) onRenameSuccess(); // Reuse the same callback for refresh
+        // Optionally show a toast or inline confirmation here
+      } else {
+        setMoveError('Move failed');
+      }
+    } catch (e) {
+      setMoveError('Network error');
+    } finally {
+      setMoveLoading(false);
+    }
+  };
+
   const renderSearchResults = (message: ChatMessage) => {
     // Filter and sort results by confidence threshold
     const filteredResults = message.results
@@ -284,6 +361,59 @@ export function SemanticChat({ className, onViewDocument, onRenameSuccess }: Sem
                     </div>
                     {renameError && <div className="text-xs text-destructive">{renameError}</div>}
                     {renameSuccess && <div className="text-xs text-green-600">File renamed successfully!</div>}
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mt-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Suggest Folder"
+                    onClick={() => {
+                      if (bestMatch.metadata?.source_path) {
+                        handleSuggestMove(bestMatch.metadata.source_path as string);
+                      }
+                    }}
+                    disabled={moveLoading && moveTargetPath === bestMatch.metadata?.source_path}
+                  >
+                    <Folder className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Suggest Folder</span>
+                  {moveLoading && moveTargetPath === bestMatch.metadata?.source_path && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                </div>
+                {showMoveInput && moveTargetPath === bestMatch.metadata?.source_path && (
+                  <div className="flex flex-col gap-2 mt-2">
+                    <input
+                      className="border rounded px-2 py-1 text-sm"
+                      value={moveInput}
+                      onChange={e => setMoveInput(e.target.value)}
+                      disabled={moveLoading}
+                      maxLength={30}
+                      placeholder="Enter folder name"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (bestMatch.metadata?.source_path) {
+                            handleApplyMove(bestMatch.metadata.source_path as string, bestMatch.filename);
+                          }
+                        }}
+                        disabled={moveLoading || !moveInput}
+                      >
+                        <Check className="h-4 w-4 mr-1" />Move File
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setShowMoveInput(false); setMoveTargetPath(null); }}
+                        disabled={moveLoading}
+                      >
+                        <X className="h-4 w-4 mr-1" />Cancel
+                      </Button>
+                    </div>
+                    {moveError && <div className="text-xs text-destructive">{moveError}</div>}
+                    {moveSuccess && <div className="text-xs text-green-600">File moved successfully!</div>}
                   </div>
                 )}
               </div>

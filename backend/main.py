@@ -79,6 +79,22 @@ class ApplyRenameResponse(BaseModel):
     new_path: str
     new_name: str
 
+class SmartMoveRequest(BaseModel):
+    file_path: str
+
+class SmartMoveResponse(BaseModel):
+    suggested_folder: str
+
+class ApplyMoveRequest(BaseModel):
+    file_path: str
+    new_folder: str
+
+class ApplyMoveResponse(BaseModel):
+    success: bool
+    old_path: str
+    new_path: str
+    new_folder: str
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -820,6 +836,91 @@ async def apply_rename(request: ApplyRenameRequest, db: Session = Depends(get_db
     except Exception as e:
         logger.warning(f"Reindex after rename failed: {e}")
     return ApplyRenameResponse(success=True, old_path=str(old_path), new_path=str(new_path), new_name=new_filename)
+
+@app.post("/smart-move", response_model=SmartMoveResponse)
+async def smart_move(request: SmartMoveRequest, db: Session = Depends(get_db)):
+    """Suggest a smart folder for a document based on its summary/content and metadata."""
+    # Find the document by file_path
+    document = db.query(Document).filter(Document.file_path == request.file_path).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    # Use summary if available, else content
+    content = document.summary if document.summary and document.summary.strip() else document.content
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="No content or summary available for this document")
+    # Get current folder path
+    current_path = Path(document.file_path).parent
+    # Use AI to suggest a new folder
+    suggested_folder = await ai_service.suggest_folder(content, str(current_path))
+    # Clean and validate suggestion
+    if not suggested_folder:
+        raise HTTPException(status_code=500, detail="Failed to generate folder suggestion")
+    # Remove invalid characters and trim
+    valid_folder = ''.join(c for c in suggested_folder if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+    if not valid_folder:
+        valid_folder = "Documents"
+    return SmartMoveResponse(suggested_folder=valid_folder)
+
+@app.post("/apply-move", response_model=ApplyMoveResponse)
+async def apply_move(request: ApplyMoveRequest, db: Session = Depends(get_db)):
+    """Move a file to a new folder on disk, update the database, and reindex the document."""
+    import shutil
+    
+    # Find the document by file_path
+    document = db.query(Document).filter(Document.file_path == request.file_path).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Validate new_folder
+    if not request.new_folder or request.new_folder.strip() == "":
+        raise HTTPException(status_code=400, detail="New folder cannot be empty")
+    
+    # Clean folder name
+    valid_folder = ''.join(c for c in request.new_folder if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+    if not valid_folder:
+        raise HTTPException(status_code=400, detail="Invalid folder name")
+    
+    # Compute paths
+    old_path = Path(document.file_path)
+    new_folder_path = old_path.parent / valid_folder
+    new_path = new_folder_path / document.filename
+    
+    # Prevent moving to the same location
+    if new_path == old_path:
+        raise HTTPException(status_code=400, detail="New location must be different from current location")
+    
+    # Create folder if it doesn't exist
+    try:
+        new_folder_path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create folder: {e}")
+    
+    # Prevent overwrite
+    if new_path.exists():
+        raise HTTPException(status_code=400, detail="A file with the same name already exists in the target folder")
+    
+    # Move file on disk
+    try:
+        shutil.move(str(old_path), str(new_path))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to move file: {e}")
+    
+    # Update database
+    document.file_path = str(new_path)
+    db.commit()
+    
+    # Reindex in ChromaDB to update metadata
+    try:
+        await search_service.index_document(document)
+    except Exception as e:
+        logger.warning(f"Reindex after move failed: {e}")
+    
+    return ApplyMoveResponse(
+        success=True, 
+        old_path=str(old_path), 
+        new_path=str(new_path), 
+        new_folder=valid_folder
+    )
 
 if __name__ == "__main__":
     uvicorn.run(

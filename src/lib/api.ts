@@ -198,7 +198,7 @@ export async function semanticSearch(query: string, filters?: SemanticSearchFilt
     if (filters) {
       requestBody.filters = filters
     }
-    
+
     const response = await fetch(`${API_BASE_URL}/semantic-search`, {
       method: 'POST',
       headers: {
@@ -206,17 +206,69 @@ export async function semanticSearch(query: string, filters?: SemanticSearchFilt
       },
       body: JSON.stringify(requestBody),
     })
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
+
     const data = await response.json()
-    return data.results as SemanticSearchResult[]
+    return data.results || []
   } catch (error) {
     console.error('Failed to perform semantic search:', error)
     throw new Error(
-      error instanceof Error
-        ? error.message
+      error instanceof Error 
+        ? error.message 
         : 'Failed to perform semantic search'
+    )
+  }
+}
+
+export async function smartMove(filePath: string): Promise<{ suggested_folder: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/smart-move`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ file_path: filePath }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Failed to get folder suggestion:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to get folder suggestion'
+    )
+  }
+}
+
+export async function applyMove(filePath: string, newFolder: string): Promise<{ success: boolean; old_path: string; new_path: string; new_folder: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/apply-move`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ file_path: filePath, new_folder: newFolder }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Failed to move file:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to move file'
     )
   }
 }

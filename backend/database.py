@@ -24,6 +24,13 @@ async def init_db():
     # Create tables
     Base.metadata.create_all(bind=engine)
     
+    # Run migration to add new columns if needed
+    try:
+        from migrate_db import migrate_database
+        migrate_database()
+    except Exception as e:
+        print(f"Migration warning: {e}")
+    
     # Create data directory if it doesn't exist
     data_dir = Path("./data")
     data_dir.mkdir(exist_ok=True)

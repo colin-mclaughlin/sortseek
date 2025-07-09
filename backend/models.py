@@ -19,6 +19,12 @@ class Document(Base):
     is_indexed = Column(Boolean, default=False)
     embedding_path = Column(String, nullable=True)
     
+    # New fields for efficient indexing
+    imported_at = Column(DateTime, default=datetime.utcnow)  # When file was first imported
+    modified_time = Column(Float, nullable=True)  # File's last modified timestamp
+    file_hash = Column(String, nullable=True)  # MD5 hash of file contents
+    last_indexed_at = Column(DateTime, nullable=True)  # When file was last indexed
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert document to dictionary"""
         return {
@@ -32,7 +38,11 @@ class Document(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "is_indexed": self.is_indexed,
-            "embedding_path": self.embedding_path
+            "embedding_path": self.embedding_path,
+            "imported_at": self.imported_at.isoformat() if self.imported_at else None,
+            "modified_time": self.modified_time,
+            "file_hash": self.file_hash,
+            "last_indexed_at": self.last_indexed_at.isoformat() if self.last_indexed_at else None
         }
 
 class SearchResult:

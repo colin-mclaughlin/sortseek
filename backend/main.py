@@ -230,6 +230,8 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
         logger.info(f"Received import request with {len(request.filePaths)} files")
         
         imported_files = []
+        indexed_count = 0
+        skipped_count = 0
         
         for file_path in request.filePaths:
             try:
@@ -249,7 +251,16 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
                 
                 if doc_dict:
                     imported_files.append(file_path)
-                    logger.info(f"Successfully imported: {file_path}")
+                    
+                    # Check if file was actually indexed or skipped
+                    db = next(get_db())
+                    doc = db.query(Document).filter(Document.id == doc_dict['id']).first()
+                    if doc and doc.is_indexed:
+                        indexed_count += 1
+                        logger.info(f"Successfully indexed: {file_path}")
+                    else:
+                        skipped_count += 1
+                        logger.info(f"Skipped (unchanged): {file_path}")
                 else:
                     logger.warning(f"Failed to import file: {file_path}")
                 
@@ -257,11 +268,11 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
                 logger.error(f"Error processing file {file_path}: {e}")
                 continue
         
-        logger.info(f"Successfully imported {len(imported_files)} files")
+        logger.info(f"Import completed: {len(imported_files)} files processed, {indexed_count} indexed, {skipped_count} skipped")
         
         return ImportFolderResponse(
             success=True,
-            message=f"Successfully imported {len(imported_files)} files",
+            message=f"Successfully processed {len(imported_files)} files ({indexed_count} indexed, {skipped_count} skipped)",
             importedFiles=imported_files,
             count=len(imported_files)
         )
@@ -270,7 +281,7 @@ async def import_folder(request: ImportFolderRequest, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/import/folder")
-async def import_folder_legacy(folder_path: str):
+async def import_folder_legacy(folder_path: str, force: bool = False):
     """Import all supported documents from a folder recursively"""
     try:
         if file_service is None:
@@ -279,33 +290,64 @@ async def import_folder_legacy(folder_path: str):
         if not os.path.exists(folder_path):
             raise HTTPException(status_code=400, detail="Folder path does not exist")
         
-        logger.info(f"Starting folder import: {folder_path}")
-        imported_files = await file_service.import_folder(folder_path)
+        logger.info(f"Starting folder import: {folder_path} (force={force})")
+        result = await file_service.import_folder(folder_path, force=force)
         
         return {
-            "message": f"Successfully imported {len(imported_files)} documents",
-            "imported_files": imported_files
+            "message": f"Successfully processed {result['total_count']} documents ({result['indexed_count']} indexed, {result['skipped_count']} skipped)",
+            "imported_files": result['imported_files'],
+            "indexed_count": result['indexed_count'],
+            "skipped_count": result['skipped_count'],
+            "total_count": result['total_count']
         }
     except Exception as e:
         logger.error(f"Folder import failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/import/file")
-async def import_file(file: UploadFile = File(...)):
+async def import_file(file: UploadFile = File(...), force: bool = False):
     """Import a single file"""
     try:
         if file_service is None:
             raise HTTPException(status_code=503, detail="FileService not initialized")
             
-        logger.info(f"Importing file: {file.filename}")
+        logger.info(f"Importing file: {file.filename} (force={force})")
         result = await file_service.import_file(file)
         
         return {
             "message": "File imported successfully",
-            "file": result
+            "file": result,
+            "force": force
         }
     except Exception as e:
         logger.error(f"File import failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/import/file/force")
+async def import_file_force(file_path: str):
+    """Force reindex a single file by path"""
+    try:
+        if file_service is None:
+            raise HTTPException(status_code=503, detail="FileService not initialized")
+            
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=400, detail="File does not exist")
+            
+        logger.info(f"Force importing file: {file_path}")
+        result = await file_service._import_single_file(Path(file_path), force=True)
+        
+        if result:
+            return {
+                "message": "File force imported successfully",
+                "file": result
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Failed to import file")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Force file import failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/documents")

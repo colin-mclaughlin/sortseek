@@ -399,6 +399,7 @@ class SearchService:
             if doc:
                 doc.is_indexed = True
                 doc.embedding_path = f"doc_{document.id}_chunked"
+                doc.last_indexed_at = datetime.datetime.utcnow()
                 db.commit()
             
             logger.info(f"Successfully indexed document {document.id}: {document.filename} ({len(chunks)} chunks)")

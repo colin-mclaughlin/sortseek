@@ -2,9 +2,9 @@ import React, { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp, Filter, Pencil, Check, X } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { semanticSearch, SemanticSearchResult, SemanticSearchFilters } from '@/lib/api'
+import { semanticSearch, SemanticSearchResult, SemanticSearchFilters, API_BASE_URL } from '@/lib/api'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Configuration constants
@@ -37,6 +37,15 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
   const [importTimeAfter, setImportTimeAfter] = useState('');
   const [importTimeBefore, setImportTimeBefore] = useState('');
   const [filterOpen, setFilterOpen] = useState(false);
+
+  // Add state for smart rename UI
+  const [renameLoading, setRenameLoading] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [suggestedName, setSuggestedName] = useState<string | null>(null);
+  const [showRenameInput, setShowRenameInput] = useState(false);
+  const [renameInput, setRenameInput] = useState('');
+  const [renameSuccess, setRenameSuccess] = useState(false);
+  const [renameTargetPath, setRenameTargetPath] = useState<string | null>(null);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -100,6 +109,62 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
     })
   }
 
+  const handleSuggestRename = async (sourcePath: string) => {
+    setRenameLoading(true);
+    setRenameError(null);
+    setRenameSuccess(false);
+    setSuggestedName(null);
+    setShowRenameInput(false);
+    setRenameInput('');
+    setRenameTargetPath(sourcePath);
+    try {
+      const response = await fetch(`${API_BASE_URL}/smart-rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: sourcePath })
+      });
+      const data = await response.json();
+      if (response.ok && data.suggested_name) {
+        setSuggestedName(data.suggested_name);
+        setRenameInput(data.suggested_name);
+        setShowRenameInput(true);
+      } else {
+        setRenameError(data.detail || 'Failed to get suggestion');
+      }
+    } catch (e) {
+      setRenameError('Network error');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
+  const handleApplyRename = async (sourcePath: string, currentFilename: string) => {
+    if (!sourcePath || !renameInput) return;
+    setRenameLoading(true);
+    setRenameError(null);
+    setRenameSuccess(false);
+    try {
+      const response = await fetch(`${API_BASE_URL}/apply-rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: sourcePath, new_name: renameInput })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        setRenameSuccess(true);
+        setShowRenameInput(false);
+        setRenameTargetPath(null);
+        // Optionally update UI or trigger refresh
+      } else {
+        setRenameError(data.detail || 'Rename failed');
+      }
+    } catch (e) {
+      setRenameError('Network error');
+    } finally {
+      setRenameLoading(false);
+    }
+  };
+
   const renderSearchResults = (message: ChatMessage) => {
     // Filter and sort results by confidence threshold
     const filteredResults = message.results
@@ -144,6 +209,58 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
                 📄 File type: {bestMatch.metadata?.filetype ?? 'Unknown'}<br />
                 🕒 Imported: {formatImportTime(bestMatch.metadata?.import_time)}<br />
                 📁 {bestMatch.metadata?.source_path ?? 'Unknown path'}
+                <div className="flex items-center gap-2 mt-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    title="Suggest New Name"
+                    onClick={() => {
+                      if (bestMatch.metadata?.source_path) {
+                        handleSuggestRename(bestMatch.metadata.source_path as string);
+                      }
+                    }}
+                    disabled={renameLoading && renameTargetPath === bestMatch.metadata?.source_path}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Suggest New Name</span>
+                  {renameLoading && renameTargetPath === bestMatch.metadata?.source_path && <Loader2 className="h-4 w-4 animate-spin ml-2" />}
+                </div>
+                {showRenameInput && renameTargetPath === bestMatch.metadata?.source_path && (
+                  <div className="flex flex-col gap-2 mt-2">
+                    <input
+                      className="border rounded px-2 py-1 text-sm"
+                      value={renameInput}
+                      onChange={e => setRenameInput(e.target.value)}
+                      disabled={renameLoading}
+                      maxLength={80}
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (bestMatch.metadata?.source_path) {
+                            handleApplyRename(bestMatch.metadata.source_path as string, bestMatch.filename);
+                          }
+                        }}
+                        disabled={renameLoading || !renameInput || renameInput === bestMatch.filename}
+                      >
+                        <Check className="h-4 w-4 mr-1" />Rename File
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => { setShowRenameInput(false); setRenameTargetPath(null); }}
+                        disabled={renameLoading}
+                      >
+                        <X className="h-4 w-4 mr-1" />Cancel
+                      </Button>
+                    </div>
+                    {renameError && <div className="text-xs text-destructive">{renameError}</div>}
+                    {renameSuccess && <div className="text-xs text-green-600">File renamed successfully!</div>}
+                  </div>
+                )}
               </div>
               <div className="text-sm text-foreground/90 leading-relaxed mb-3">
                 {bestMatch.content.length > 400

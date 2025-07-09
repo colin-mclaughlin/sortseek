@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 import logging
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi import Depends
@@ -62,6 +62,22 @@ class SummarizeClauseRequest(BaseModel):
     text: str
 class SummarizeClauseResponse(BaseModel):
     summary: str
+
+class SmartRenameRequest(BaseModel):
+    file_path: str
+
+class SmartRenameResponse(BaseModel):
+    suggested_name: str
+
+class ApplyRenameRequest(BaseModel):
+    file_path: str
+    new_name: str
+
+class ApplyRenameResponse(BaseModel):
+    success: bool
+    old_path: str
+    new_path: str
+    new_name: str
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -733,6 +749,77 @@ async def summarize_clause(request: SummarizeClauseRequest):
     except Exception as e:
         logger.error(f"Summarize clause failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to summarize clause")
+
+@app.post("/smart-rename", response_model=SmartRenameResponse)
+async def smart_rename(request: SmartRenameRequest, db: Session = Depends(get_db)):
+    """Suggest a smart filename for a document based on its summary/content and metadata."""
+    # Find the document by file_path
+    document = db.query(Document).filter(Document.file_path == request.file_path).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    # Use summary if available, else content
+    content = document.summary if document.summary and document.summary.strip() else document.content
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="No content or summary available for this document")
+    # Get current filename and extension
+    current_name = Path(document.filename).stem
+    extension = Path(document.filename).suffix
+    # Use AI to suggest a new filename (without extension)
+    suggested_base = await ai_service.suggest_filename(content, current_name=current_name)
+    # Clean and validate suggestion, preserve extension
+    if not suggested_base:
+        raise HTTPException(status_code=500, detail="Failed to generate filename suggestion")
+    # Remove invalid characters and trim
+    valid_base = ''.join(c for c in suggested_base if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+    if not valid_base:
+        valid_base = current_name
+    # Ensure extension is preserved
+    suggested_name = f"{valid_base}{extension}"
+    return SmartRenameResponse(suggested_name=suggested_name)
+
+@app.post("/apply-rename", response_model=ApplyRenameResponse)
+async def apply_rename(request: ApplyRenameRequest, db: Session = Depends(get_db)):
+    """Rename a file on disk, update the database, and reindex the document."""
+    # Find the document by file_path
+    document = db.query(Document).filter(Document.file_path == request.file_path).first()
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    # Validate new_name
+    if not request.new_name or request.new_name.strip() == "":
+        raise HTTPException(status_code=400, detail="New name cannot be empty")
+    # Ensure extension is preserved
+    old_ext = Path(document.filename).suffix
+    new_ext = Path(request.new_name).suffix or old_ext
+    base_name = Path(request.new_name).stem
+    # Remove invalid characters
+    valid_base = ''.join(c for c in base_name if c.isalnum() or c in (' ', '-', '_')).strip().replace(' ', '_')
+    if not valid_base:
+        valid_base = Path(document.filename).stem
+    new_filename = f"{valid_base}{new_ext}"
+    # Prevent renaming to the same name
+    if new_filename == document.filename:
+        raise HTTPException(status_code=400, detail="New name must be different from current name")
+    # Compute new file path
+    old_path = Path(document.file_path)
+    new_path = old_path.with_name(new_filename)
+    # Prevent overwrite
+    if new_path.exists():
+        raise HTTPException(status_code=400, detail="A file with the new name already exists")
+    # Rename file on disk
+    try:
+        os.rename(old_path, new_path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to rename file: {e}")
+    # Update database
+    document.filename = new_filename
+    document.file_path = str(new_path)
+    db.commit()
+    # Trigger reindex (optional: could be async)
+    try:
+        await search_service.index_document(document)
+    except Exception as e:
+        logger.warning(f"Reindex after rename failed: {e}")
+    return ApplyRenameResponse(success=True, old_path=str(old_path), new_path=str(new_path), new_name=new_filename)
 
 if __name__ == "__main__":
     uvicorn.run(

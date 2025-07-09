@@ -155,8 +155,31 @@ export function SemanticChat({ className, onViewDocument, onRenameSuccess }: Sem
         setRenameSuccess(true);
         setShowRenameInput(false);
         setRenameTargetPath(null);
+        // Update all chatHistory results in place
+        setChatHistory(prevHistory => prevHistory.map(msg => ({
+          ...msg,
+          results: msg.results.map(result => {
+            // Update if filename or source_path matches old values
+            if (
+              result.filename === currentFilename ||
+              result.metadata?.source_path === data.old_path
+            ) {
+              return {
+                ...result,
+                filename: data.new_name,
+                file_path: data.new_path,
+                metadata: {
+                  ...result.metadata,
+                  source_path: data.new_path,
+                  filetype: data.new_name.split('.').pop()?.toUpperCase() || result.metadata?.filetype
+                }
+              };
+            }
+            return result;
+          })
+        })));
         if (onRenameSuccess) onRenameSuccess();
-        // Optionally update UI or trigger refresh
+        // Optionally show a toast or inline confirmation here
       } else {
         setRenameError(data.detail || 'Rename failed');
       }

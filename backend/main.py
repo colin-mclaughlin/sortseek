@@ -814,7 +814,7 @@ async def apply_rename(request: ApplyRenameRequest, db: Session = Depends(get_db
     document.filename = new_filename
     document.file_path = str(new_path)
     db.commit()
-    # Trigger reindex (optional: could be async)
+    # Reindex in ChromaDB to update metadata
     try:
         await search_service.index_document(document)
     except Exception as e:

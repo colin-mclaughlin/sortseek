@@ -196,6 +196,11 @@ function App(): React.JSX.Element {
     }
   }
 
+  const handleRenameSuccess = () => {
+    loadDocuments();
+    // Optionally: show a toast or UI notification here
+  };
+
   // Debug function to test document viewer
   const handleTestDocumentViewer = () => {
     // Test with a sample document path - you can replace this with an actual document path
@@ -324,7 +329,11 @@ function App(): React.JSX.Element {
               </TabsList>
               
               <TabsContent value="chat" className="mt-6 h-[calc(100vh-200px)]">
-                <SemanticChat onViewDocument={handleViewDocumentFromSearch} />
+                <SemanticChat
+                  className="flex-1"
+                  onViewDocument={handleViewDocumentFromSearch}
+                  onRenameSuccess={handleRenameSuccess}
+                />
               </TabsContent>
               
               <TabsContent value="documents" className="mt-6">

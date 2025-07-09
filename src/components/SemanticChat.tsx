@@ -13,6 +13,7 @@ const MIN_CONFIDENCE = 0.80
 interface SemanticChatProps {
   className?: string
   onViewDocument?: (filePath: string, fileName: string, fileType: string, content?: string) => void
+  onRenameSuccess?: () => void
 }
 
 interface ChatMessage {
@@ -26,7 +27,7 @@ function formatImportTime(isoString?: string): string {
   return isoString ? new Date(isoString).toLocaleString() : 'Unknown time';
 }
 
-export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
+export function SemanticChat({ className, onViewDocument, onRenameSuccess }: SemanticChatProps) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -154,6 +155,7 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
         setRenameSuccess(true);
         setShowRenameInput(false);
         setRenameTargetPath(null);
+        if (onRenameSuccess) onRenameSuccess();
         // Optionally update UI or trigger refresh
       } else {
         setRenameError(data.detail || 'Rename failed');

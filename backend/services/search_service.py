@@ -675,7 +675,12 @@ class SearchService:
                     "content": doc,
                     "score": final_score,
                     "original_score": score,
-                    "filename_boost": filename_boost
+                    "filename_boost": filename_boost,
+                    "metadata": {
+                        "filetype": meta.get("filetype"),
+                        "import_time": meta.get("import_time"),
+                        "source_path": meta.get("source_path")
+                    }
                 })
             
             # Re-rank results by final score (highest first)

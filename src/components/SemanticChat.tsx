@@ -22,6 +22,10 @@ interface ChatMessage {
   timestamp: Date
 }
 
+function formatImportTime(isoString?: string): string {
+  return isoString ? new Date(isoString).toLocaleString() : 'Unknown time';
+}
+
 export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -135,6 +139,12 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
                 )}
                 <span className="ml-auto text-xs text-muted-foreground">Score: {bestMatch.score.toFixed(2)}</span>
               </div>
+              {/* Metadata block below filename/badge */}
+              <div className="mt-2 text-sm text-muted-foreground break-words">
+                📄 File type: {bestMatch.metadata?.filetype ?? 'Unknown'}<br />
+                🕒 Imported: {formatImportTime(bestMatch.metadata?.import_time)}<br />
+                📁 {bestMatch.metadata?.source_path ?? 'Unknown path'}
+              </div>
               <div className="text-sm text-foreground/90 leading-relaxed mb-3">
                 {bestMatch.content.length > 400
                   ? bestMatch.content.slice(0, 400) + '...'
@@ -172,9 +182,9 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
             {!isCollapsed && (
               <div className="space-y-2">
                 {otherResults.map((result, idx) => (
-                  <Card key={idx} className="shadow-sm border-l-4 border-l-primary">
+                  <Card key={idx} className="shadow-sm">
                     <CardContent className="py-3">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-1">
                         <FileText className="h-4 w-4 text-primary" />
                         <span className="font-medium text-sm">{result.filename}</span>
                         {typeof result.page === 'number' && (
@@ -183,9 +193,13 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
                             Page {result.page}
                           </span>
                         )}
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          Score: {result.score.toFixed(2)}
-                        </span>
+                        <span className="ml-auto text-xs text-muted-foreground">Score: {result.score.toFixed(2)}</span>
+                      </div>
+                      {/* Metadata block below filename */}
+                      <div className="mt-2 text-sm text-muted-foreground break-words">
+                        📄 File type: {result.metadata?.filetype ?? 'Unknown'}<br />
+                        🕒 Imported: {formatImportTime(result.metadata?.import_time)}<br />
+                        📁 {result.metadata?.source_path ?? 'Unknown path'}
                       </div>
                       <div className="text-sm text-foreground/90 leading-relaxed mb-2">
                         {result.content.length > 300

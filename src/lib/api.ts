@@ -34,6 +34,12 @@ export interface SemanticSearchResult {
   page?: number
   content: string
   score: number
+  metadata?: {
+    filetype?: string;
+    import_time?: string;
+    source_path?: string;
+    [key: string]: any;
+  };
 }
 
 /**

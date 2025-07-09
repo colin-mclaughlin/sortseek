@@ -3,8 +3,9 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Search, FileText, BookOpen, Sparkles, Eye, ChevronDown, ChevronUp } from 'lucide-react'
-import { semanticSearch, SemanticSearchResult } from '@/lib/api'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Loader2, Search, FileText, BookOpen, Sparkles, Eye, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { semanticSearch, SemanticSearchResult, SemanticSearchFilters } from '@/lib/api'
 
 // Configuration constants
 const MIN_CONFIDENCE = 0.80
@@ -17,11 +18,15 @@ interface SemanticSearchPanelProps {
 
 export function SemanticSearchPanel({ isOpen, onClose, onViewDocument }: SemanticSearchPanelProps) {
   const [query, setQuery] = useState('')
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>('all')
   const [results, setResults] = useState<SemanticSearchResult[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [searched, setSearched] = useState(false)
   const [showOtherResults, setShowOtherResults] = useState(true)
+  const [folderFilter, setFolderFilter] = useState('');
+  const [importTimeAfter, setImportTimeAfter] = useState('');
+  const [importTimeBefore, setImportTimeBefore] = useState('');
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -31,7 +36,13 @@ export function SemanticSearchPanel({ isOpen, onClose, onViewDocument }: Semanti
     setResults([])
     setSearched(false)
     try {
-      const res = await semanticSearch(query)
+      // Prepare filters
+      const filters: SemanticSearchFilters = {}
+      if (fileTypeFilter !== 'all') filters.filetype = fileTypeFilter;
+      if (folderFilter.trim()) filters.folder = folderFilter.trim();
+      if (importTimeAfter) filters.import_time_after = importTimeAfter;
+      if (importTimeBefore) filters.import_time_before = importTimeBefore;
+      const res = await semanticSearch(query, filters)
       setResults(res)
       setSearched(true)
     } catch (err) {
@@ -69,7 +80,43 @@ export function SemanticSearchPanel({ isOpen, onClose, onViewDocument }: Semanti
             Semantic Search
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSearch} className="flex items-center gap-2 px-6 pb-4">
+        <div className="px-6 pb-2 text-2xl">🦄 RANDOM TEST EMOJI</div>
+        <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-2 px-6 pb-4">
+          {/* Filetype filter inside the search bar */}
+          <Select value={fileTypeFilter} onValueChange={setFileTypeFilter}>
+            <SelectTrigger className="w-24 h-10 mr-2">
+              <SelectValue placeholder="All" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="pdf">PDF</SelectItem>
+              <SelectItem value="txt">TXT</SelectItem>
+              <SelectItem value="docx">DOCX</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            value={folderFilter}
+            onChange={e => setFolderFilter(e.target.value)}
+            placeholder="Folder/path"
+            className="w-32"
+            type="text"
+          />
+          <input
+            type="date"
+            value={importTimeAfter}
+            onChange={e => setImportTimeAfter(e.target.value)}
+            className="border rounded px-2 py-1 text-sm h-10"
+            title="Imported after"
+            style={{ minWidth: 120 }}
+          />
+          <input
+            type="date"
+            value={importTimeBefore}
+            onChange={e => setImportTimeBefore(e.target.value)}
+            className="border rounded px-2 py-1 text-sm h-10"
+            title="Imported before"
+            style={{ minWidth: 120 }}
+          />
           <Input
             value={query}
             onChange={e => setQuery(e.target.value)}

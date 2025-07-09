@@ -45,6 +45,7 @@ class SummarizeResponse(BaseModel):
 class SemanticSearchRequest(BaseModel):
     query: str
     top_k: int = 5
+    filters: Optional[dict] = None
 
 class SemanticSearchResult(BaseModel):
     filename: str
@@ -408,7 +409,9 @@ async def semantic_search(request: SemanticSearchRequest):
     """Semantic search over imported documents using ChromaDB and OpenAI embeddings"""
     try:
         logger.info(f"Received semantic search query: {request.query}")
-        results = await search_service.semantic_search(request.query, top_k=request.top_k)
+        if request.filters:
+            logger.info(f"Applied filters: {request.filters}")
+        results = await search_service.semantic_search(request.query, top_k=request.top_k, filters=request.filters)
         logger.info(f"Semantic search returned {len(results)} results")
         return {"results": results, "count": len(results)}
     except Exception as e:

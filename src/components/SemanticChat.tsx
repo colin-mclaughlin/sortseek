@@ -2,8 +2,10 @@ import React, { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp } from 'lucide-react'
-import { semanticSearch, SemanticSearchResult } from '@/lib/api'
+import { Loader2, Search, FileText, BookOpen, Sparkles, Send, Eye, ChevronDown, ChevronUp, Filter } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { semanticSearch, SemanticSearchResult, SemanticSearchFilters } from '@/lib/api'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 // Configuration constants
 const MIN_CONFIDENCE = 0.80
@@ -26,6 +28,11 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
   const [error, setError] = useState<string | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [collapsedResults, setCollapsedResults] = useState<Set<string>>(new Set())
+  const [fileTypeFilter, setFileTypeFilter] = useState<string>('all');
+  const [folderFilter, setFolderFilter] = useState('');
+  const [importTimeAfter, setImportTimeAfter] = useState('');
+  const [importTimeBefore, setImportTimeBefore] = useState('');
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const handleSearch = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -36,7 +43,12 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
     setError(null)
     
     try {
-      const results = await semanticSearch(currentQuery)
+      const filters: SemanticSearchFilters = {};
+      if (fileTypeFilter !== 'all') filters.filetype = fileTypeFilter;
+      if (folderFilter.trim()) filters.folder = folderFilter.trim();
+      if (importTimeAfter) filters.import_time_after = importTimeAfter;
+      if (importTimeBefore) filters.import_time_before = importTimeBefore;
+      const results = await semanticSearch(currentQuery, filters);
       
       const newMessage: ChatMessage = {
         id: Date.now().toString(),
@@ -208,7 +220,7 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
   }
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
+    <div className={`flex flex-col h-full ${className}`}> 
       {/* Chat History */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {chatHistory.length === 0 ? (
@@ -259,7 +271,7 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
         )}
       </div>
       
-      {/* Input Area */}
+      {/* Bottom Search Bar */}
       <div className="border-t bg-background p-4">
         <form onSubmit={handleSearch} className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -271,15 +283,62 @@ export function SemanticChat({ className, onViewDocument }: SemanticChatProps) {
               className="pr-10"
               disabled={loading}
             />
-            <Button
-              type="submit"
-              size="icon"
-              className="absolute right-1 top-1/2 transform -translate-y-1/2 h-8 w-8"
-              disabled={loading || !query.trim()}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
           </div>
+          {/* Filter Button and Popover */}
+          <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+            <PopoverTrigger asChild>
+              <Button type="button" variant="outline" size="icon" className="h-10 w-10" title="Filters">
+                <Filter className="h-5 w-5" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-4 flex flex-col gap-3">
+              <div className="font-semibold mb-2">Filters</div>
+              <Select value={fileTypeFilter} onValueChange={setFileTypeFilter}>
+                <SelectTrigger className="w-full h-10">
+                  <SelectValue placeholder="All filetypes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="txt">TXT</SelectItem>
+                  <SelectItem value="docx">DOCX</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                value={folderFilter}
+                onChange={e => setFolderFilter(e.target.value)}
+                placeholder="Folder/path"
+                className="w-full"
+                type="text"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={importTimeAfter}
+                  onChange={e => setImportTimeAfter(e.target.value)}
+                  className="border rounded px-2 py-1 text-sm h-10 w-full"
+                  title="Imported after"
+                />
+                <input
+                  type="date"
+                  value={importTimeBefore}
+                  onChange={e => setImportTimeBefore(e.target.value)}
+                  className="border rounded px-2 py-1 text-sm h-10 w-full"
+                  title="Imported before"
+                />
+              </div>
+              <Button type="button" variant="secondary" onClick={() => { setFileTypeFilter('all'); setFolderFilter(''); setImportTimeAfter(''); setImportTimeBefore(''); }}>Clear Filters</Button>
+            </PopoverContent>
+          </Popover>
+          <Button
+            type="submit"
+            size="icon"
+            className="h-10 w-10"
+            disabled={loading || !query.trim()}
+            title="Search"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
         </form>
         <p className="text-xs text-muted-foreground mt-2 text-center">
           Browse your files below or ask a question above

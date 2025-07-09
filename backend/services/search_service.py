@@ -133,6 +133,44 @@ class SearchService:
         
         return 1.0
     
+    def _apply_filters(self, search_results: List[Dict[str, Any]], filters: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Apply filters to search results based on metadata.
+        Supports:
+        - filetype: filter by file type (case-insensitive)
+        - folder: substring match on file_path
+        - import_time_after: only include results imported after this ISO date
+        - import_time_before: only include results imported before this ISO date
+        """
+        filtered_results = []
+        for result in search_results:
+            filename = result.get("filename", "").lower()
+            file_path = result.get("file_path", "").lower()
+            import_time = result.get("import_time")
+            # Filetype filter
+            if "filetype" in filters:
+                requested_filetype = filters["filetype"].lower()
+                if "." in filename:
+                    file_extension = filename.split(".")[-1]
+                else:
+                    file_extension = ""
+                if file_extension != requested_filetype:
+                    continue
+            # Folder/path filter (substring match)
+            if "folder" in filters:
+                if filters["folder"].lower() not in file_path:
+                    continue
+            # Import time after filter
+            if "import_time_after" in filters and import_time:
+                if import_time < filters["import_time_after"]:
+                    continue
+            # Import time before filter
+            if "import_time_before" in filters and import_time:
+                if import_time > filters["import_time_before"]:
+                    continue
+            filtered_results.append(result)
+        return filtered_results
+    
     def _get_embedding_function(self):
         """Get the embedding function for ChromaDB"""
         if self._embedding_function is None:
@@ -583,7 +621,7 @@ class SearchService:
             logger.error(f"Error finding matching snippet: {e}")
             return content[:max_length] + "..." if len(content) > max_length else content
     
-    async def semantic_search(self, query: str, top_k: int = 5) -> list:
+    async def semantic_search(self, query: str, top_k: int = 5, filters: Optional[Dict[str, Any]] = None) -> list:
         """Semantic search for top_k relevant chunks using OpenAI embeddings and ChromaDB"""
         try:
             print(f"🔍 Starting semantic search for query: '{query}' (top_k={top_k})")
@@ -642,6 +680,13 @@ class SearchService:
             
             # Re-rank results by final score (highest first)
             search_results.sort(key=lambda x: x["score"], reverse=True)
+            
+            # Apply filters if provided
+            if filters:
+                original_count = len(search_results)
+                search_results = self._apply_filters(search_results, filters)
+                filtered_count = len(search_results)
+                print(f"🔍 Applied filters: {original_count} → {filtered_count} results")
             
             # Log filename boost summary
             if query_filenames:

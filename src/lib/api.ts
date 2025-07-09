@@ -179,14 +179,26 @@ export async function summarizeDocument(request: SummarizeRequest): Promise<Summ
   }
 } 
 
-export async function semanticSearch(query: string): Promise<SemanticSearchResult[]> {
+export interface SemanticSearchFilters {
+  filetype?: string;
+  folder?: string;
+  import_time_after?: string; // ISO date string
+  import_time_before?: string; // ISO date string
+}
+
+export async function semanticSearch(query: string, filters?: SemanticSearchFilters): Promise<SemanticSearchResult[]> {
   try {
+    const requestBody: any = { query }
+    if (filters) {
+      requestBody.filters = filters
+    }
+    
     const response = await fetch(`${API_BASE_URL}/semantic-search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify(requestBody),
     })
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)

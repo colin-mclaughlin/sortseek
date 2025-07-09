@@ -338,3 +338,89 @@ export async function summarizeClause(text: string): Promise<{ summary: string }
   if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
   return await response.json();
 }
+
+// New types for file tree operations
+export interface FileTreeNode {
+  name: string
+  path: string
+  children: FileTreeNode[]
+  is_file: boolean
+  size?: number
+  modified?: string
+  type?: string
+}
+
+export interface FileTreeResponse {
+  success: boolean
+  message: string
+  tree?: FileTreeNode
+}
+
+export interface FileListItem {
+  name: string
+  path: string
+  type: string
+  size: number
+  modified: string
+  is_file: boolean
+}
+
+export interface FilesInFolderResponse {
+  success: boolean
+  message: string
+  files: FileListItem[]
+}
+
+/**
+ * Get file tree structure from a base path
+ */
+export async function getFileTree(basePath: string): Promise<FileTreeResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/file-tree?base_path=${encodeURIComponent(basePath)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Failed to get file tree:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to get file tree'
+    )
+  }
+}
+
+/**
+ * Get files in a specific folder
+ */
+export async function getFilesInFolder(folderPath: string): Promise<FilesInFolderResponse> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/files-in-folder?path=${encodeURIComponent(folderPath)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Failed to get files in folder:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to get files in folder'
+    )
+  }
+}

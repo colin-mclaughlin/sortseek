@@ -343,4 +343,37 @@ function scanForPdfFiles(folderPath: string): string[] {
   }
 }
 
+// IPC handler for selecting root folder for file explorer
+ipcMain.handle('select-root-folder', async () => {
+  try {
+    console.log('📁 Opening root folder selection dialog for file explorer...')
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select root folder for file explorer'
+    })
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const rootPath = result.filePaths[0]
+      console.log('📁 Selected root folder for file explorer:', rootPath)
+      
+      return {
+        success: true,
+        rootPath
+      }
+    } else {
+      console.log('📁 Root folder selection cancelled')
+      return {
+        success: false,
+        message: 'No root folder selected'
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error selecting root folder:', error)
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Unknown error'
+    }
+  }
+})
+
 console.log('🎯 Main process setup completed') 

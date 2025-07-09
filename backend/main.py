@@ -95,6 +95,37 @@ class ApplyMoveResponse(BaseModel):
     new_path: str
     new_folder: str
 
+# New Pydantic models for file tree operations
+class FileTreeNode(BaseModel):
+    name: str
+    path: str
+    children: List['FileTreeNode'] = []
+    is_file: bool = False
+    size: Optional[int] = None
+    modified: Optional[str] = None
+    type: Optional[str] = None
+
+class FileTreeResponse(BaseModel):
+    success: bool
+    message: str
+    tree: Optional[FileTreeNode] = None
+
+class FileListItem(BaseModel):
+    name: str
+    path: str
+    type: str
+    size: int
+    modified: str
+    is_file: bool = True
+
+class FilesInFolderResponse(BaseModel):
+    success: bool
+    message: str
+    files: List[FileListItem] = []
+
+# Update FileTreeNode to handle forward references
+FileTreeNode.model_rebuild()
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -922,11 +953,150 @@ async def apply_move(request: ApplyMoveRequest, db: Session = Depends(get_db)):
         new_folder=valid_folder
     )
 
+@app.get("/file-tree", response_model=FileTreeResponse)
+async def get_file_tree(base_path: str):
+    """Get a nested folder tree structure starting from the given base path"""
+    try:
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        # Validate and normalize the base path
+        base_path = os.path.abspath(base_path)
+        if not os.path.exists(base_path):
+            raise HTTPException(status_code=404, detail="Base path does not exist")
+        
+        def build_tree(path: str, max_depth: int = 3, current_depth: int = 0) -> FileTreeNode:
+            """Recursively build the file tree"""
+            if current_depth >= max_depth:
+                return None
+                
+            try:
+                path_obj = Path(path)
+                if not path_obj.exists():
+                    return None
+                
+                # Get basic info
+                name = path_obj.name if path_obj.name else path_obj.parts[-1]
+                is_file = path_obj.is_file()
+                
+                node = FileTreeNode(
+                    name=name,
+                    path=str(path_obj.absolute()),
+                    is_file=is_file,
+                    children=[]
+                )
+                
+                # If it's a file, add file metadata
+                if is_file:
+                    try:
+                        stat = path_obj.stat()
+                        node.size = stat.st_size
+                        node.modified = datetime.fromtimestamp(stat.st_mtime).isoformat()
+                        node.type = path_obj.suffix.lower() if path_obj.suffix else "unknown"
+                    except (OSError, PermissionError):
+                        pass
+                else:
+                    # If it's a directory, recursively add children
+                    try:
+                        children = []
+                        for child_path in path_obj.iterdir():
+                            # Skip hidden files and system files
+                            if child_path.name.startswith('.') or child_path.name.startswith('$'):
+                                continue
+                            
+                            child_node = build_tree(str(child_path), max_depth, current_depth + 1)
+                            if child_node:
+                                children.append(child_node)
+                        
+                        # Sort: directories first, then files, both alphabetically
+                        children.sort(key=lambda x: (x.is_file, x.name.lower()))
+                        node.children = children
+                    except (OSError, PermissionError):
+                        pass
+                
+                return node
+                
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Permission denied or error accessing {path}: {e}")
+                return None
+        
+        # Build the tree
+        tree = build_tree(base_path)
+        
+        if not tree:
+            raise HTTPException(status_code=500, detail="Failed to build file tree")
+        
+        return FileTreeResponse(
+            success=True,
+            message="File tree retrieved successfully",
+            tree=tree
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file tree: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get file tree: {str(e)}")
+
+@app.get("/files-in-folder", response_model=FilesInFolderResponse)
+async def get_files_in_folder(path: str):
+    """Get a list of files in the specified folder"""
+    try:
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        # Validate and normalize the path
+        folder_path = os.path.abspath(path)
+        if not os.path.exists(folder_path):
+            raise HTTPException(status_code=404, detail="Folder does not exist")
+        
+        if not os.path.isdir(folder_path):
+            raise HTTPException(status_code=400, detail="Path is not a directory")
+        
+        files = []
+        path_obj = Path(folder_path)
+        
+        try:
+            for item in path_obj.iterdir():
+                # Skip hidden files and system files
+                if item.name.startswith('.') or item.name.startswith('$'):
+                    continue
+                
+                try:
+                    stat = item.stat()
+                    file_item = FileListItem(
+                        name=item.name,
+                        path=str(item.absolute()),
+                        type=item.suffix.lower() if item.suffix else "folder" if item.is_dir() else "unknown",
+                        size=stat.st_size,
+                        modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        is_file=item.is_file()
+                    )
+                    files.append(file_item)
+                except (OSError, PermissionError):
+                    # Skip files we can't access
+                    continue
+            
+            # Sort: directories first, then files, both alphabetically
+            files.sort(key=lambda x: (x.is_file, x.name.lower()))
+            
+            return FilesInFolderResponse(
+                success=True,
+                message=f"Found {len(files)} items in folder",
+                files=files
+            )
+            
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Permission denied accessing folder {folder_path}: {e}")
+            raise HTTPException(status_code=403, detail="Permission denied accessing folder")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting files in folder: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get files in folder: {str(e)}")
+
 if __name__ == "__main__":
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=True,
-        log_level="info"
-    ) 
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

@@ -10,6 +10,7 @@ import { IntegratedDocumentViewer } from '@/components/IntegratedDocumentViewer'
 import { SemanticSearchPanel } from '@/components/SemanticSearchPanel'
 import { SemanticChat } from '@/components/SemanticChat'
 import { DeleteConfirmDialog } from '@/components/DeleteConfirmDialog'
+import { FileExplorer } from '@/components/FileExplorer'
 
 function App(): React.JSX.Element {
   const [isBackendConnected, setIsBackendConnected] = useState(false)
@@ -213,6 +214,40 @@ function App(): React.JSX.Element {
     setIsDocumentViewerOpen(true)
   }
 
+  const handleViewFileFromExplorer = (filePath: string, fileName: string, fileType: string) => {
+    setSelectedDocument({ 
+      filePath, 
+      fileName, 
+      fileType,
+      content: undefined // Will be loaded by the viewer
+    })
+    setIsDocumentViewerOpen(true)
+  }
+
+  const handleImportFileFromExplorer = async (filePath: string) => {
+    try {
+      setIsImporting(true)
+      setImportError(null)
+      
+      const importResult = await importFolder([filePath])
+      
+      if (!importResult.success) {
+        throw new Error(importResult.message || 'Failed to import file')
+      }
+      
+      console.log('File imported successfully:', importResult)
+      
+      // Refresh documents list
+      await loadDocuments()
+      
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Unknown error')
+      console.error('Import failed:', error)
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   useEffect(() => {
     // Check backend status on component mount
     checkBackendStatus()
@@ -336,84 +371,12 @@ function App(): React.JSX.Element {
                 />
               </TabsContent>
               
-              <TabsContent value="documents" className="mt-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Your Documents ({documents.length})</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {documents.length === 0 ? (
-                      <div className="text-center py-12">
-                        <FolderOpen className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                        <h3 className="text-lg font-medium mb-2">No documents yet</h3>
-                        <p className="text-muted-foreground mb-4">
-                          Import a folder to get started with SortSeek
-                        </p>
-                        <Button 
-                          onClick={handleImportFolder}
-                          disabled={isImporting || !isBackendConnected}
-                        >
-                          {isImporting ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <FolderOpen className="mr-2 h-4 w-4" />
-                          )}
-                          {isImporting ? 'Importing...' : 'Import Folder'}
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {documents.map((doc) => (
-                          <div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg">
-                            <div className="flex items-center space-x-3">
-                              <FileText className="h-5 w-5 text-muted-foreground" />
-                              <div>
-                                <p className="font-medium">{doc.filename}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {doc.file_path} • {doc.file_type.toUpperCase()}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <div className="text-sm text-muted-foreground">
-                                {(doc.file_size / 1024 / 1024).toFixed(2)} MB
-                              </div>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleRefreshDocument(doc)}
-                                disabled={refreshingDocuments.has(doc.id)}
-                                title="Refresh document from disk"
-                              >
-                                <RotateCcw className={`h-4 w-4 mr-1 ${refreshingDocuments.has(doc.id) ? 'animate-spin' : ''}`} />
-                                {refreshingDocuments.has(doc.id) ? 'Refreshing...' : 'Refresh'}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleViewDocument(doc)}
-                                title="View document"
-                              >
-                                <Eye className="h-4 w-4 mr-1" />
-                                View
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleDeleteDocument(doc)}
-                                title="Delete document"
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                              >
-                                <Trash2 className="h-4 w-4 mr-1" />
-                                Delete
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+              <TabsContent value="documents" className="mt-6 h-[calc(100vh-200px)]">
+                <FileExplorer
+                  onViewFile={handleViewFileFromExplorer}
+                  onImportFile={handleImportFileFromExplorer}
+                  className="h-full"
+                />
               </TabsContent>
             </Tabs>
           </div>

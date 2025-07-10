@@ -424,3 +424,30 @@ export async function getFilesInFolder(folderPath: string): Promise<FilesInFolde
     )
   }
 }
+
+/**
+ * Read file content directly from filesystem for viewing
+ */
+export async function readFileContent(filePath: string): Promise<{ success: boolean; content?: string; message: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/read-file-content?path=${encodeURIComponent(filePath)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('Failed to read file content:', error)
+    throw new Error(
+      error instanceof Error 
+        ? error.message 
+        : 'Failed to read file content'
+    )
+  }
+}

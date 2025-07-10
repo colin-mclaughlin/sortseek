@@ -219,7 +219,7 @@ function App(): React.JSX.Element {
       filePath, 
       fileName, 
       fileType,
-      content: undefined // Will be loaded by the viewer
+      content: undefined // Will be loaded by the viewer from filesystem
     })
     setIsDocumentViewerOpen(true)
   }

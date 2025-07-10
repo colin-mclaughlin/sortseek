@@ -1140,5 +1140,77 @@ async def get_files_in_folder(path: str):
         logger.error(f"Error getting files in folder: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get files in folder: {str(e)}")
 
+@app.get("/read-file-content")
+async def read_file_content(path: str):
+    """Read file content directly from filesystem for viewing"""
+    try:
+        import os
+        from pathlib import Path
+        
+        # Validate and normalize the path
+        file_path = os.path.abspath(path)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File does not exist")
+        
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=400, detail="Path is not a file")
+        
+        path_obj = Path(file_path)
+        file_extension = path_obj.suffix.lower()
+        
+        # Check if file type is supported
+        supported_extensions = ['.txt', '.docx', '.pdf']
+        if file_extension not in supported_extensions:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_extension}")
+        
+        try:
+            if file_extension == '.txt':
+                # Read text file directly
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return {
+                    "success": True,
+                    "content": content,
+                    "message": "File content read successfully"
+                }
+            
+            elif file_extension == '.docx':
+                # Use existing file service to extract text from DOCX
+                if file_service:
+                    try:
+                        content = await file_service.extract_text_from_docx(file_path)
+                        return {
+                            "success": True,
+                            "content": content,
+                            "message": "DOCX content extracted successfully"
+                        }
+                    except Exception as e:
+                        logger.error(f"Error extracting DOCX content: {e}")
+                        raise HTTPException(status_code=500, detail=f"Failed to extract DOCX content: {str(e)}")
+                else:
+                    raise HTTPException(status_code=500, detail="File service not available")
+            
+            elif file_extension == '.pdf':
+                # For PDFs, we'll return a message indicating they need special handling
+                # The frontend will use the existing PDF viewer
+                return {
+                    "success": True,
+                    "content": None,
+                    "message": "PDF file - use PDF viewer"
+                }
+            
+        except (OSError, PermissionError) as e:
+            logger.warning(f"Permission denied reading file {file_path}: {e}")
+            raise HTTPException(status_code=403, detail="Permission denied reading file")
+        except UnicodeDecodeError as e:
+            logger.error(f"Unicode decode error reading file {file_path}: {e}")
+            raise HTTPException(status_code=400, detail="File encoding not supported")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error reading file content: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read file content: {str(e)}")
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

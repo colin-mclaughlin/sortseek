@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { summarizeDocument, SummarizeResponse, PageSummary } from '@/lib/api'
+import { summarizeDocument, SummarizeResponse, PageSummary, readFileContent } from '@/lib/api'
 import { summarizeClause } from '@/lib/api'
 
 
@@ -174,20 +174,35 @@ export function IntegratedDocumentViewer({
     
     try {
       if (fileType === '.txt') {
-        // For TXT files, use the content directly
-        if (!content) {
-          throw new Error('No content available for this text file')
+        // For TXT files, use the content directly or read from filesystem
+        if (content) {
+          setRenderedContent(content)
+          console.log('✅ IntegratedDocumentViewer: TXT content from props')
+        } else {
+          // Read content directly from filesystem
+          const result = await readFileContent(filePath)
+          if (result.success && result.content) {
+            setRenderedContent(result.content)
+            console.log('✅ IntegratedDocumentViewer: TXT content read from filesystem')
+          } else {
+            throw new Error(result.message || 'Failed to read text file')
+          }
         }
-        setRenderedContent(content)
-        console.log('✅ IntegratedDocumentViewer: TXT content processed')
       } else if (fileType === '.docx') {
-        // For DOCX files, we'll display the extracted text
-        if (!content) {
-          throw new Error('No content available for this DOCX file')
+        // For DOCX files, use the content directly or read from filesystem
+        if (content) {
+          setRenderedContent(content)
+          console.log('✅ IntegratedDocumentViewer: DOCX content from props (extracted text)')
+        } else {
+          // Read content directly from filesystem
+          const result = await readFileContent(filePath)
+          if (result.success && result.content) {
+            setRenderedContent(result.content)
+            console.log('✅ IntegratedDocumentViewer: DOCX content read from filesystem')
+          } else {
+            throw new Error(result.message || 'Failed to read DOCX file')
+          }
         }
-        
-        setRenderedContent(content)
-        console.log('✅ IntegratedDocumentViewer: DOCX content processed (extracted text)')
       }
       
       setLoading(false)

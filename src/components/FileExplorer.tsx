@@ -14,17 +14,26 @@ import {
   Trash2, 
   MoreHorizontal,
   Calendar,
-  HardDrive
+  HardDrive,
+  ArrowLeft,
+  Home,
+  Search,
+  RefreshCw,
+  Download,
+  Copy,
+  Sparkles
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { Input } from '@/components/ui/input'
 import { 
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
-  DropdownMenuTrigger 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu'
 import { getFileTree, getFilesInFolder, FileTreeNode, FileListItem } from '@/lib/api'
 
@@ -32,6 +41,11 @@ interface FileExplorerProps {
   onViewFile?: (filePath: string, fileName: string, fileType: string) => void
   onImportFile?: (filePath: string) => void
   className?: string
+}
+
+interface BreadcrumbItem {
+  name: string
+  path: string
 }
 
 export function FileExplorer({ onViewFile, onImportFile, className }: FileExplorerProps) {
@@ -42,6 +56,9 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
 
   // Load root path from localStorage on mount
   useEffect(() => {
@@ -49,6 +66,9 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     if (savedRootPath) {
       setRootPath(savedRootPath)
       loadFileTree(savedRootPath)
+      setCurrentFolder(savedRootPath)
+      loadFilesInFolder(savedRootPath)
+      updateBreadcrumbs(savedRootPath)
     }
   }, [])
 
@@ -67,6 +87,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       await loadFileTree(selectedPath)
       setCurrentFolder(selectedPath)
       await loadFilesInFolder(selectedPath)
+      updateBreadcrumbs(selectedPath)
       
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to select root folder')
@@ -104,6 +125,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       if (response.success) {
         setFilesInCurrentFolder(response.files)
         setCurrentFolder(folderPath)
+        updateBreadcrumbs(folderPath)
       } else {
         throw new Error(response.message || 'Failed to load files')
       }
@@ -112,6 +134,44 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       console.error('Error loading files in folder:', error)
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const updateBreadcrumbs = (path: string) => {
+    const pathParts = path.split(/[\\/]/).filter(Boolean)
+    const breadcrumbItems: BreadcrumbItem[] = []
+    
+    let currentPath = ''
+    pathParts.forEach((part, index) => {
+      if (index === 0) {
+        // Handle Windows drive letter
+        currentPath = part + (pathParts.length > 1 ? '\\' : '')
+      } else {
+        currentPath += (currentPath.endsWith('\\') ? '' : '\\') + part
+      }
+      breadcrumbItems.push({
+        name: part,
+        path: currentPath
+      })
+    })
+    
+    setBreadcrumbs(breadcrumbItems)
+  }
+
+  const handleBreadcrumbClick = (path: string) => {
+    loadFilesInFolder(path)
+  }
+
+  const handleGoBack = () => {
+    if (currentFolder && breadcrumbs.length > 1) {
+      const parentPath = breadcrumbs[breadcrumbs.length - 2].path
+      loadFilesInFolder(parentPath)
+    }
+  }
+
+  const handleGoHome = () => {
+    if (rootPath) {
+      loadFilesInFolder(rootPath)
     }
   }
 
@@ -134,6 +194,24 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   const handleFileClick = (file: FileListItem) => {
     if (onViewFile) {
       onViewFile(file.path, file.name, file.type)
+    }
+  }
+
+  const handleFileSelect = (filePath: string, event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) {
+      // Multi-select
+      setSelectedFiles(prev => {
+        const newSet = new Set(prev)
+        if (newSet.has(filePath)) {
+          newSet.delete(filePath)
+        } else {
+          newSet.add(filePath)
+        }
+        return newSet
+      })
+    } else {
+      // Single select
+      setSelectedFiles(new Set([filePath]))
     }
   }
 
@@ -186,6 +264,15 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     const date = new Date(dateString)
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
+
+  const isSupportedFile = (fileType: string): boolean => {
+    const supportedTypes = ['.pdf', '.docx', '.txt']
+    return supportedTypes.includes(fileType.toLowerCase())
+  }
+
+  const filteredFiles = filesInCurrentFolder.filter(file => 
+    file.name.toLowerCase().includes(searchQuery.toLowerCase())
+  )
 
   const renderTreeNode = (node: FileTreeNode, depth: number = 0) => {
     const isExpanded = expandedFolders.has(node.path)
@@ -262,7 +349,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       {/* Left Panel - Folder Tree */}
       <div className="w-1/3 border-r bg-card">
         <div className="p-4 border-b">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium">Folder Tree</h3>
             <Button
               variant="outline"
@@ -273,7 +360,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
               Change Root
             </Button>
           </div>
-          <p className="text-sm text-muted-foreground mt-1 truncate" title={rootPath}>
+          <p className="text-sm text-muted-foreground truncate" title={rootPath}>
             Root: {rootPath}
           </p>
         </div>
@@ -309,23 +396,69 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
 
       {/* Right Panel - File List */}
       <div className="flex-1 flex flex-col">
-        <div className="p-4 border-b">
-          <h3 className="font-medium">
-            {currentFolder ? (
-              <span className="truncate" title={currentFolder}>
-                {currentFolder.split('\\').pop() || currentFolder.split('/').pop() || currentFolder}
-              </span>
-            ) : (
-              'Select a folder'
-            )}
-          </h3>
-          {currentFolder && (
-            <p className="text-sm text-muted-foreground mt-1 truncate" title={currentFolder}>
-              {currentFolder}
-            </p>
-          )}
+        {/* Header with breadcrumbs and actions */}
+        <div className="p-4 border-b bg-card">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGoBack}
+                disabled={breadcrumbs.length <= 1}
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGoHome}
+              >
+                <Home className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => currentFolder && loadFilesInFolder(currentFolder)}
+                disabled={isLoading}
+              >
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              </Button>
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search files..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 w-64"
+                />
+              </div>
+            </div>
+          </div>
+          
+          {/* Breadcrumbs */}
+          <div className="flex items-center space-x-1 text-sm">
+            {breadcrumbs.map((crumb, index) => (
+              <React.Fragment key={crumb.path}>
+                <button
+                  onClick={() => handleBreadcrumbClick(crumb.path)}
+                  className={`hover:text-primary transition-colors ${
+                    index === breadcrumbs.length - 1 ? 'text-foreground font-medium' : 'text-muted-foreground'
+                  }`}
+                >
+                  {crumb.name}
+                </button>
+                {index < breadcrumbs.length - 1 && (
+                  <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
         </div>
         
+        {/* File List */}
         <div className="flex-1 overflow-y-auto p-4">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
@@ -343,67 +476,91 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
                 Retry
               </Button>
             </div>
-          ) : filesInCurrentFolder.length === 0 ? (
+          ) : filteredFiles.length === 0 ? (
             <div className="text-center py-8">
               <Folder className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No files in this folder</p>
+              <p className="text-muted-foreground">
+                {searchQuery ? 'No files match your search' : 'No files in this folder'}
+              </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filesInCurrentFolder.map((file) => (
-                <Card key={file.path} className="hover:shadow-md transition-shadow">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3 flex-1 min-w-0">
-                        {getFileIcon(file.type, file.is_file)}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-sm truncate" title={file.name}>
-                            {file.name}
-                          </p>
-                          <div className="flex items-center space-x-2 mt-1">
-                            <Badge variant="secondary" className="text-xs">
-                              {file.type.toUpperCase()}
-                            </Badge>
-                            {file.is_file && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredFiles.map((file) => {
+                const isSelected = selectedFiles.has(file.path)
+                const isSupported = isSupportedFile(file.type)
+                
+                return (
+                  <Card 
+                    key={file.path} 
+                    className={`hover:shadow-md transition-all cursor-pointer ${
+                      isSelected ? 'ring-2 ring-primary bg-accent' : ''
+                    }`}
+                    onClick={(e) => handleFileSelect(file.path, e)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-3 flex-1 min-w-0">
+                          {getFileIcon(file.type, file.is_file)}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate" title={file.name}>
+                              {file.name}
+                            </p>
+                            <div className="flex items-center space-x-2 mt-1">
+                              <Badge variant="secondary" className="text-xs">
+                                {file.type.toUpperCase()}
+                              </Badge>
+                              {file.is_file && (
+                                <span className="text-xs text-muted-foreground">
+                                  {formatFileSize(file.size)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center space-x-1 mt-1">
+                              <Calendar className="h-3 w-3 text-muted-foreground" />
                               <span className="text-xs text-muted-foreground">
-                                {formatFileSize(file.size)}
+                                {formatDate(file.modified)}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center space-x-1 mt-1">
-                            <Calendar className="h-3 w-3 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {formatDate(file.modified)}
-                            </span>
+                            </div>
                           </div>
                         </div>
+                        
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {file.is_file && isSupported && onViewFile && (
+                              <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                                <Eye className="mr-2 h-4 w-4" />
+                                View
+                              </DropdownMenuItem>
+                            )}
+                            {file.is_file && isSupported && (
+                              <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Summarize
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            {file.is_file && onImportFile && (
+                              <DropdownMenuItem onClick={() => onImportFile(file.path)}>
+                                <Download className="mr-2 h-4 w-4" />
+                                Import to Library
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem>
+                              <Copy className="mr-2 h-4 w-4" />
+                              Copy Path
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                      
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {file.is_file && onViewFile && (
-                            <DropdownMenuItem onClick={() => handleFileClick(file)}>
-                              <Eye className="mr-2 h-4 w-4" />
-                              View
-                            </DropdownMenuItem>
-                          )}
-                          {file.is_file && onImportFile && (
-                            <DropdownMenuItem onClick={() => onImportFile(file.path)}>
-                              <FolderOpen className="mr-2 h-4 w-4" />
-                              Import
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           )}
         </div>

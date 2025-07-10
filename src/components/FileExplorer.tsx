@@ -21,7 +21,8 @@ import {
   RefreshCw,
   Download,
   Copy,
-  Sparkles
+  Sparkles,
+  AlertCircle
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -192,7 +193,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   }
 
   const handleFileClick = (file: FileListItem) => {
-    if (onViewFile) {
+    if (onViewFile && isSupportedFile(file.type)) {
       onViewFile(file.path, file.name, file.type)
     }
   }
@@ -212,6 +213,29 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     } else {
       // Single select
       setSelectedFiles(new Set([filePath]))
+    }
+  }
+
+  const handleCardClick = (file: FileListItem, event: React.MouseEvent) => {
+    // Handle file selection
+    handleFileSelect(file.path, event)
+    
+    // If it's a folder, navigate to it
+    if (!file.is_file) {
+      handleFolderClick(file.path)
+    }
+    // If it's a supported file, open it
+    else if (isSupportedFile(file.type)) {
+      handleFileClick(file)
+    }
+  }
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      // You could add a toast notification here
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error)
     }
   }
 
@@ -248,7 +272,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       case '.7z':
         return <Archive className="h-4 w-4 text-yellow-500" />
       default:
-        return <File className="h-4 w-4 text-gray-500" />
+        return <File className="h-4 w-4 text-gray-400" />
     }
   }
 
@@ -274,15 +298,111 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const supportedFiles = filteredFiles.filter(file => file.is_file && isSupportedFile(file.type))
+  const unsupportedFiles = filteredFiles.filter(file => file.is_file && !isSupportedFile(file.type))
+  const folders = filteredFiles.filter(file => !file.is_file)
+
+  const renderFileCard = (file: FileListItem) => {
+    const isSelected = selectedFiles.has(file.path)
+    const isSupported = isSupportedFile(file.type)
+    const isFolder = !file.is_file
+    
+    return (
+      <Card 
+        key={file.path} 
+        className={`group hover:shadow-lg transition-all duration-200 cursor-pointer ${
+          isSelected ? 'ring-2 ring-primary bg-accent' : ''
+        } ${!isSupported && file.is_file ? 'opacity-60' : ''}`}
+        onClick={(e) => handleCardClick(file, e)}
+      >
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-3 flex-1 min-w-0">
+              {getFileIcon(file.type, file.is_file)}
+              <div className="flex-1 min-w-0">
+                <p className={`font-medium text-sm truncate ${!isSupported && file.is_file ? 'text-muted-foreground' : ''}`} title={file.name}>
+                  {file.name}
+                </p>
+                <div className="flex items-center space-x-2 mt-1">
+                  <Badge 
+                    variant={!isSupported && file.is_file ? "outline" : "secondary"} 
+                    className={`text-xs ${!isSupported && file.is_file ? 'text-muted-foreground' : ''}`}
+                  >
+                    {file.type.toUpperCase()}
+                  </Badge>
+                  {file.is_file && (
+                    <span className="text-xs text-muted-foreground">
+                      {formatFileSize(file.size)}
+                    </span>
+                  )}
+                  {!isSupported && file.is_file && (
+                    <span className="text-xs text-muted-foreground">
+                      Unsupported
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-1 mt-1">
+                  <Calendar className="h-3 w-3 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(file.modified)}
+                  </span>
+                </div>
+              </div>
+            </div>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {file.is_file && isSupported && onViewFile && (
+                  <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                    <Eye className="mr-2 h-4 w-4" />
+                    View
+                  </DropdownMenuItem>
+                )}
+                {file.is_file && isSupported && (
+                  <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Summarize
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                {file.is_file && onImportFile && (
+                  <DropdownMenuItem onClick={() => onImportFile(file.path)}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Import to Library
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => copyToClipboard(file.path)}>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy Path
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   const renderTreeNode = (node: FileTreeNode, depth: number = 0) => {
     const isExpanded = expandedFolders.has(node.path)
     const hasChildren = node.children && node.children.length > 0
+    const isCurrentFolder = currentFolder === node.path
     
     return (
       <div key={node.path}>
         <div 
-          className={`flex items-center space-x-2 px-2 py-1 hover:bg-accent hover:text-accent-foreground rounded cursor-pointer ${
-            currentFolder === node.path ? 'bg-accent text-accent-foreground' : ''
+          className={`flex items-center space-x-2 px-2 py-1 hover:bg-accent hover:text-accent-foreground rounded cursor-pointer transition-colors ${
+            isCurrentFolder ? 'bg-accent text-accent-foreground font-medium' : ''
           }`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => node.is_file ? handleFileClick(node as any) : handleFolderClick(node.path)}
@@ -293,7 +413,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
                 e.stopPropagation()
                 toggleFolder(node.path)
               }}
-              className="p-0.5 hover:bg-background rounded"
+              className="p-0.5 hover:bg-background rounded transition-colors"
             >
               {isExpanded ? (
                 <ChevronDown className="h-3 w-3" />
@@ -316,6 +436,38 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
         )}
       </div>
     )
+  }
+
+  const renderEmptyState = () => {
+    if (searchQuery) {
+      return (
+        <div className="text-center py-8">
+          <Search className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-muted-foreground">No files match your search</p>
+        </div>
+      )
+    }
+
+    if (folders.length === 0 && supportedFiles.length === 0 && unsupportedFiles.length === 0) {
+      return (
+        <div className="text-center py-8">
+          <Folder className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-muted-foreground">This folder is empty.</p>
+        </div>
+      )
+    }
+
+    if (folders.length === 0 && supportedFiles.length === 0 && unsupportedFiles.length > 0) {
+      return (
+        <div className="text-center py-8">
+          <AlertCircle className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-muted-foreground mb-2">No supported files here.</p>
+          <p className="text-sm text-muted-foreground">Supported formats: .pdf, .docx, .txt</p>
+        </div>
+      )
+    }
+
+    return null
   }
 
   if (!rootPath) {
@@ -476,92 +628,15 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
                 Retry
               </Button>
             </div>
-          ) : filteredFiles.length === 0 ? (
-            <div className="text-center py-8">
-              <Folder className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                {searchQuery ? 'No files match your search' : 'No files in this folder'}
-              </p>
-            </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredFiles.map((file) => {
-                const isSelected = selectedFiles.has(file.path)
-                const isSupported = isSupportedFile(file.type)
-                
-                return (
-                  <Card 
-                    key={file.path} 
-                    className={`hover:shadow-md transition-all cursor-pointer ${
-                      isSelected ? 'ring-2 ring-primary bg-accent' : ''
-                    }`}
-                    onClick={(e) => handleFileSelect(file.path, e)}
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center space-x-3 flex-1 min-w-0">
-                          {getFileIcon(file.type, file.is_file)}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate" title={file.name}>
-                              {file.name}
-                            </p>
-                            <div className="flex items-center space-x-2 mt-1">
-                              <Badge variant="secondary" className="text-xs">
-                                {file.type.toUpperCase()}
-                              </Badge>
-                              {file.is_file && (
-                                <span className="text-xs text-muted-foreground">
-                                  {formatFileSize(file.size)}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center space-x-1 mt-1">
-                              <Calendar className="h-3 w-3 text-muted-foreground" />
-                              <span className="text-xs text-muted-foreground">
-                                {formatDate(file.modified)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            {file.is_file && isSupported && onViewFile && (
-                              <DropdownMenuItem onClick={() => handleFileClick(file)}>
-                                <Eye className="mr-2 h-4 w-4" />
-                                View
-                              </DropdownMenuItem>
-                            )}
-                            {file.is_file && isSupported && (
-                              <DropdownMenuItem onClick={() => handleFileClick(file)}>
-                                <Sparkles className="mr-2 h-4 w-4" />
-                                Summarize
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuSeparator />
-                            {file.is_file && onImportFile && (
-                              <DropdownMenuItem onClick={() => onImportFile(file.path)}>
-                                <Download className="mr-2 h-4 w-4" />
-                                Import to Library
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem>
-                              <Copy className="mr-2 h-4 w-4" />
-                              Copy Path
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )
-              })}
-            </div>
+            <>
+              {renderEmptyState()}
+              {filteredFiles.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                  {filteredFiles.map(renderFileCard)}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

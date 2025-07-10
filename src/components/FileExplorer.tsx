@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { 
   Folder, 
   File, 
@@ -22,7 +22,9 @@ import {
   Download,
   Copy,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Brain,
+  Lock
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -60,6 +62,19 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   const [searchQuery, setSearchQuery] = useState('')
   const [breadcrumbs, setBreadcrumbs] = useState<BreadcrumbItem[]>([])
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
+  const [accessDenied, setAccessDenied] = useState(false)
+  
+  // Refs for scrolling to active folder
+  const treeContainerRef = useRef<HTMLDivElement>(null)
+  const activeFolderRef = useRef<HTMLDivElement>(null)
+  
+  // Mock indexed paths for demonstration (replace with real backend data later)
+  const [indexedPaths] = useState<Set<string>>(new Set([
+    // Add some mock indexed paths for testing
+    'C:\\Users\\Documents\\Work',
+    'C:\\Users\\Documents\\Personal',
+    'C:\\Users\\Downloads\\Important',
+  ]))
 
   // Load root path from localStorage on mount
   useEffect(() => {
@@ -72,6 +87,61 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       updateBreadcrumbs(savedRootPath)
     }
   }, [])
+
+  // Auto-expand folders when navigating to ensure current folder is visible
+  useEffect(() => {
+    if (currentFolder && fileTree) {
+      expandPathToFolder(currentFolder)
+    }
+  }, [currentFolder, fileTree])
+
+  // Scroll to active folder when it changes
+  useEffect(() => {
+    if (activeFolderRef.current && treeContainerRef.current) {
+      setTimeout(() => {
+        activeFolderRef.current?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest'
+        })
+      }, 100)
+    }
+  }, [currentFolder])
+
+  // Helper: Find path in tree and return array of ancestor paths
+  const findPathInTree = (tree: FileTreeNode, targetPath: string) => {
+    const stack: string[] = []
+    function dfs(node: FileTreeNode, pathSoFar: string[]): boolean {
+      if (!node) return false
+      const thisPath = node.path
+      pathSoFar.push(thisPath)
+      if (thisPath === targetPath) return true
+      if (node.children) {
+        for (const child of node.children) {
+          if (dfs(child, pathSoFar)) return true
+        }
+      }
+      pathSoFar.pop()
+      return false
+    }
+    const found = dfs(tree, stack)
+    return found ? stack : null
+  }
+
+  const expandPathToFolder = (targetPath: string) => {
+    if (!fileTree) return
+    const pathStack = findPathInTree(fileTree, targetPath)
+    if (!pathStack) return // Don't expand if not in tree
+    const newExpanded = new Set(expandedFolders)
+    for (const p of pathStack) {
+      newExpanded.add(p)
+    }
+    setExpandedFolders(newExpanded)
+  }
+
+  const isIndexed = (path: string): boolean => {
+    return indexedPaths.has(path)
+  }
 
   const handleSelectRootFolder = async () => {
     try {
@@ -120,9 +190,15 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     try {
       setIsLoading(true)
       setError(null)
-      
+      setAccessDenied(false)
       const response = await getFilesInFolder(folderPath)
-      
+      if (response.status === 403) {
+        setFilesInCurrentFolder([])
+        setAccessDenied(true)
+        setCurrentFolder(folderPath)
+        updateBreadcrumbs(folderPath)
+        return
+      }
       if (response.success) {
         setFilesInCurrentFolder(response.files)
         setCurrentFolder(folderPath)
@@ -132,6 +208,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
       }
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Failed to load files')
+      setAccessDenied(false)
       console.error('Error loading files in folder:', error)
     } finally {
       setIsLoading(false)
@@ -188,7 +265,8 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     })
   }
 
-  const handleFolderClick = (folderPath: string) => {
+  const handleFolderClick = (folderPath: string, restricted?: boolean) => {
+    if (restricted) return
     loadFilesInFolder(folderPath)
   }
 
@@ -217,15 +295,10 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   }
 
   const handleCardClick = (file: FileListItem, event: React.MouseEvent) => {
-    // Handle file selection
     handleFileSelect(file.path, event)
-    
-    // If it's a folder, navigate to it
-    if (!file.is_file) {
+    if (!file.is_file && !file.restricted) {
       handleFolderClick(file.path)
-    }
-    // If it's a supported file, open it
-    else if (isSupportedFile(file.type)) {
+    } else if (file.is_file && isSupportedFile(file.type)) {
       handleFileClick(file)
     }
   }
@@ -306,23 +379,34 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     const isSelected = selectedFiles.has(file.path)
     const isSupported = isSupportedFile(file.type)
     const isFolder = !file.is_file
-    
+    const isIndexedItem = isIndexed(file.path)
+    const isRestricted = file.restricted
     return (
       <Card 
         key={file.path} 
-        className={`group hover:shadow-lg transition-all duration-200 cursor-pointer ${
+        className={`group hover:shadow-lg transition-all duration-200 ${
           isSelected ? 'ring-2 ring-primary bg-accent' : ''
-        } ${!isSupported && file.is_file ? 'opacity-60' : ''}`}
-        onClick={(e) => handleCardClick(file, e)}
+        } ${!isSupported && file.is_file ? 'opacity-60' : ''} ${isRestricted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+        onClick={isRestricted ? undefined : (e) => handleCardClick(file, e)}
       >
         <CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div className="flex items-center space-x-3 flex-1 min-w-0">
-              {getFileIcon(file.type, file.is_file)}
+              {isRestricted ? <Lock className="h-4 w-4 text-muted-foreground" /> : getFileIcon(file.type, file.is_file)}
               <div className="flex-1 min-w-0">
-                <p className={`font-medium text-sm truncate ${!isSupported && file.is_file ? 'text-muted-foreground' : ''}`} title={file.name}>
-                  {file.name}
-                </p>
+                <div className="flex items-center space-x-2">
+                  <p className={`font-medium text-sm truncate ${!isSupported && file.is_file ? 'text-muted-foreground' : ''}`} title={file.name}>
+                    {file.name}
+                  </p>
+                  {isIndexedItem && (
+                    <div title="Indexed for AI search">
+                      <Brain className="h-3 w-3 text-purple-500" />
+                    </div>
+                  )}
+                  {isRestricted && (
+                    <Badge variant="outline" className="text-xs text-muted-foreground flex items-center"><Lock className="h-3 w-3 mr-1" />Restricted</Badge>
+                  )}
+                </div>
                 <div className="flex items-center space-x-2 mt-1">
                   <Badge 
                     variant={!isSupported && file.is_file ? "outline" : "secondary"} 
@@ -349,44 +433,45 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
                 </div>
               </div>
             </div>
-            
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {file.is_file && isSupported && onViewFile && (
-                  <DropdownMenuItem onClick={() => handleFileClick(file)}>
-                    <Eye className="mr-2 h-4 w-4" />
-                    View
+            {!isRestricted && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {file.is_file && isSupported && onViewFile && (
+                    <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                      <Eye className="mr-2 h-4 w-4" />
+                      View
+                    </DropdownMenuItem>
+                  )}
+                  {file.is_file && isSupported && (
+                    <DropdownMenuItem onClick={() => handleFileClick(file)}>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Summarize
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  {file.is_file && onImportFile && (
+                    <DropdownMenuItem onClick={() => onImportFile(file.path)}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Import to Library
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => copyToClipboard(file.path)}>
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy Path
                   </DropdownMenuItem>
-                )}
-                {file.is_file && isSupported && (
-                  <DropdownMenuItem onClick={() => handleFileClick(file)}>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Summarize
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                {file.is_file && onImportFile && (
-                  <DropdownMenuItem onClick={() => onImportFile(file.path)}>
-                    <Download className="mr-2 h-4 w-4" />
-                    Import to Library
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={() => copyToClipboard(file.path)}>
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy Path
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -397,17 +482,20 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
     const isExpanded = expandedFolders.has(node.path)
     const hasChildren = node.children && node.children.length > 0
     const isCurrentFolder = currentFolder === node.path
-    
+    const isIndexedItem = isIndexed(node.path)
+    // Determine if this folder is restricted by checking filesInCurrentFolder (for current node)
+    const isRestricted = filesInCurrentFolder.find(f => f.path === node.path && f.restricted)
     return (
       <div key={node.path}>
         <div 
-          className={`flex items-center space-x-2 px-2 py-1 hover:bg-accent hover:text-accent-foreground rounded cursor-pointer transition-colors ${
-            isCurrentFolder ? 'bg-accent text-accent-foreground font-medium' : ''
-          }`}
+          ref={isCurrentFolder ? activeFolderRef : null}
+          className={`flex items-center space-x-2 px-2 py-1 rounded transition-colors ${
+            isCurrentFolder ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-accent hover:text-accent-foreground'
+          } ${isRestricted ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
-          onClick={() => node.is_file ? handleFileClick(node as any) : handleFolderClick(node.path)}
+          onClick={isRestricted ? undefined : () => node.is_file ? handleFileClick(node as any) : handleFolderClick(node.path, isRestricted)}
         >
-          {!node.is_file && hasChildren && (
+          {!node.is_file && hasChildren && !isRestricted && (
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -422,14 +510,23 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
               )}
             </button>
           )}
-          {!node.is_file && !hasChildren && (
+          {!node.is_file && (!hasChildren || isRestricted) && (
             <div className="w-3 h-3" />
           )}
-          {getFileIcon(node.type || '', node.is_file)}
-          <span className="text-sm truncate">{node.name}</span>
+          {isRestricted ? <Lock className="h-4 w-4 text-muted-foreground" /> : getFileIcon(node.type || '', node.is_file)}
+          <div className="flex items-center space-x-1 flex-1 min-w-0">
+            <span className="text-sm truncate">{node.name}</span>
+            {isIndexedItem && (
+              <div title="Indexed for AI search">
+                <Brain className="h-3 w-3 text-purple-500 flex-shrink-0" />
+              </div>
+            )}
+            {isRestricted && (
+              <Badge variant="outline" className="text-xs text-muted-foreground flex items-center"><Lock className="h-3 w-3 mr-1" />Restricted</Badge>
+            )}
+          </div>
         </div>
-        
-        {!node.is_file && isExpanded && hasChildren && (
+        {!node.is_file && isExpanded && hasChildren && !isRestricted && (
           <div>
             {node.children.map(child => renderTreeNode(child, depth + 1))}
           </div>
@@ -439,6 +536,16 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
   }
 
   const renderEmptyState = () => {
+    if (accessDenied) {
+      return (
+        <div className="text-center py-8">
+          <Lock className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-lg font-medium mb-2 text-muted-foreground">Access denied to this folder.</p>
+          <p className="text-muted-foreground">This location is restricted by the operating system.</p>
+        </div>
+      )
+    }
+
     if (searchQuery) {
       return (
         <div className="text-center py-8">
@@ -469,6 +576,8 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
 
     return null
   }
+
+  const isCurrentFolderInTree = fileTree && currentFolder && findPathInTree(fileTree, currentFolder)
 
   if (!rootPath) {
     return (
@@ -517,7 +626,7 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
           </p>
         </div>
         
-        <div className="p-2 overflow-y-auto h-[calc(100vh-300px)]">
+        <div ref={treeContainerRef} className="p-2 overflow-y-auto h-[calc(100vh-300px)]">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
@@ -536,7 +645,24 @@ export function FileExplorer({ onViewFile, onImportFile, className }: FileExplor
             </div>
           ) : fileTree ? (
             <div>
-              {renderTreeNode(fileTree)}
+              {isCurrentFolderInTree ? (
+                renderTreeNode(fileTree)
+              ) : (
+                <div className="text-center py-8">
+                  <AlertCircle className="mx-auto h-8 w-8 text-muted-foreground mb-2" />
+                  <p className="text-muted-foreground mb-2">Current folder is outside the tree.</p>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    if (!currentFolder) return;
+                    setRootPath(currentFolder)
+                    loadFileTree(currentFolder)
+                    setCurrentFolder(currentFolder)
+                    loadFilesInFolder(currentFolder)
+                    updateBreadcrumbs(currentFolder)
+                  }}>
+                    Set as new root
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center py-8">

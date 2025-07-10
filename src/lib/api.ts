@@ -363,12 +363,14 @@ export interface FileListItem {
   size: number
   modified: string
   is_file: boolean
+  restricted?: boolean // Add restricted field for restricted folders
 }
 
 export interface FilesInFolderResponse {
   success: boolean
   message: string
   files: FileListItem[]
+  status?: number // Add status for error handling
 }
 
 /**
@@ -410,18 +412,24 @@ export async function getFilesInFolder(folderPath: string): Promise<FilesInFolde
       },
     })
 
+    const data = await response.json()
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      // Surface status and message for error handling
+      return {
+        ...data,
+        status: response.status,
+        files: data.files || [],
+      }
     }
-
-    return await response.json()
+    return data
   } catch (error) {
     console.error('Failed to get files in folder:', error)
-    throw new Error(
-      error instanceof Error 
-        ? error.message 
-        : 'Failed to get files in folder'
-    )
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to get files in folder',
+      files: [],
+      status: 500,
+    }
   }
 }
 

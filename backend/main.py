@@ -117,6 +117,7 @@ class FileListItem(BaseModel):
     size: int
     modified: str
     is_file: bool = True
+    restricted: Optional[bool] = False  # New field to indicate restricted folders
 
 class FilesInFolderResponse(BaseModel):
     success: bool
@@ -1105,36 +1106,44 @@ async def get_files_in_folder(path: str):
                 # Skip hidden files and system files
                 if item.name.startswith('.') or item.name.startswith('$'):
                     continue
-                
+                restricted = False
                 try:
                     stat = item.stat()
-                    file_item = FileListItem(
-                        name=item.name,
-                        path=str(item.absolute()),
-                        type=item.suffix.lower() if item.suffix else "folder" if item.is_dir() else "unknown",
-                        size=stat.st_size,
-                        modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                        is_file=item.is_file()
-                    )
-                    files.append(file_item)
                 except (OSError, PermissionError):
-                    # Skip files we can't access
-                    continue
-            
+                    # Mark as restricted if we can't access
+                    restricted = True
+                    stat = None
+                file_item = FileListItem(
+                    name=item.name,
+                    path=str(item.absolute()),
+                    type=item.suffix.lower() if item.suffix else "folder" if item.is_dir() else "unknown",
+                    size=stat.st_size if stat else 0,
+                    modified=datetime.fromtimestamp(stat.st_mtime).isoformat() if stat else '',
+                    is_file=item.is_file(),
+                    restricted=restricted if item.is_dir() else False
+                )
+                files.append(file_item)
             # Sort: directories first, then files, both alphabetically
             files.sort(key=lambda x: (x.is_file, x.name.lower()))
-            
             return FilesInFolderResponse(
                 success=True,
                 message=f"Found {len(files)} items in folder",
                 files=files
             )
-            
         except (OSError, PermissionError) as e:
             logger.warning(f"Permission denied accessing folder {folder_path}: {e}")
-            raise HTTPException(status_code=403, detail="Permission denied accessing folder")
-            
-    except HTTPException:
+            return JSONResponse(status_code=403, content={
+                "success": False,
+                "message": "Access denied to this folder. This location is restricted by the operating system.",
+                "files": []
+            })
+    except HTTPException as he:
+        if he.status_code == 403:
+            return JSONResponse(status_code=403, content={
+                "success": False,
+                "message": "Access denied to this folder. This location is restricted by the operating system.",
+                "files": []
+            })
         raise
     except Exception as e:
         logger.error(f"Error getting files in folder: {e}")
